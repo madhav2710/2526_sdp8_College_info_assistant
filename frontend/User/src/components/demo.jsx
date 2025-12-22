@@ -7,18 +7,42 @@ import {
 } from "@/components/ui/prompt-input"
 import { Button } from "@/components/ui/button"
 import { ArrowUpIcon } from "lucide-react"
-import { useState } from "react"
+import { useState, useRef } from "react"
 
 /**
  * Example showing PromptInput without suggestions
  */
 export function PromptSuggestionBasic() {
   const [inputValue, setInputValue] = useState("")
+  const conversationIdRef = useRef(window.crypto.randomUUID())
 
-  const handleSend = () => {
-    if (inputValue.trim()) {
-      console.log("Sending:", inputValue)
+  const handleSend = async () => {
+    const trimmed = inputValue.trim()
+    if (!trimmed) return
+
+    try {
+      const response = await fetch("http://127.0.0.1:8000/chat/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          conversation_id: conversationIdRef.current,
+          role: "user",
+          content: trimmed,
+        }),
+      })
+
+      if (!response.ok) {
+        console.error("Failed to send message:", await response.text())
+        return
+      }
+
+      const data = await response.json()
+      console.log("Saved to database:", data)
       setInputValue("")
+    } catch (error) {
+      console.error("Error sending message:", error)
     }
   }
 

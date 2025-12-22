@@ -1,15 +1,47 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from uuid import UUID
 from datetime import datetime
 from typing import Optional
-import psycopg2
+from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv() # Load your environment variables
+# Load environment variables from .env file in the backend directory
+env_path = Path(__file__).parent / '.env'
+load_dotenv(dotenv_path=env_path)
+
+# Initialize Supabase Client
+# Make sure these match the keys in your .env file exactly!
+url: str = os.getenv("supabase_url")
+key: str = os.getenv("supabase_key")
+
+# Validate that environment variables are set
+if not url or not key:
+    missing_vars = []
+    if not url:
+        missing_vars.append("supabase_url")
+    if not key:
+        missing_vars.append("supabase_key")
+    raise ValueError(
+        f"Missing required environment variables: {', '.join(missing_vars)}. "
+        "Please create a .env file in the backend directory with these variables set."
+    )
+
+supabase: Client = create_client(url, key)
 
 app = FastAPI()
+
+# Allow the frontend (Vite dev server) to call this API from the browser
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # For development; you can restrict this later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class ChatMessage(BaseModel):
     conversation_id: UUID 
@@ -17,43 +49,56 @@ class ChatMessage(BaseModel):
     content: str
     # We make this optional so the Database can set the default time
     created_at: Optional[datetime] = None
-
+class ChatRequest(BaseModel):
+    user_id: UUID
+    title: str
+# We can keep this for now, but we are using the DB primarily
 chat_history=[]
 
 @app.post("/chat/")
 async def create_chat(message: ChatMessage):
     try:
-        # 1. Connect
-        conn = psycopg2.connect(
-            user=os.getenv("user"),
-            password=os.getenv("password"),
-            host=os.getenv("host"),
-            port=os.getenv("port"),
-            dbname=os.getenv("dbname")
-        )
-        cursor = conn.cursor()
+        # Create a dictionary for Supabase
+        # We convert the UUID to a string to be safe
+        data_to_insert = {
+            "conversation_id": str(message.conversation_id),
+            "role": message.role,
+            "content": message.content
+        }
 
-        # 2. The SQL Query
-        query = "INSERT INTO messages (conversation_id, role, content) VALUES (%s, %s, %s)"
+        # Insert the data into the 'messages' table
+        response = supabase.table("messages").insert(data_to_insert).execute()
 
-        # 3. Execute with Data (We need to fill this in!)
-        cursor.execute(query, (str(message.conversation_id), message.role, message.content))
-        
-        # 4. Save and Close
-        conn.commit()
-        cursor.close()
-        conn.close()
+        return {"status": "Message sent", "data": response.data}
 
-        return {"status": "Message sent", "data": message}
+    except Exception as e:
+        error_msg = str(e)
+        # Provide more helpful error messages for common issues
+        if "Invalid API key" in error_msg or "401" in error_msg:
+            return {
+                "error": "Invalid Supabase API key. Please check your .env file and ensure 'supabase_key' is set correctly.",
+                "details": error_msg
+            }
+        return {"error": error_msg}
+# 2. The Start Chat Endpoint
+@app.post("/start_chat/")
+async def start_chat(request: ChatRequest):
+    try:
+        # Prepare the data dictionary
+        data_to_insert = {
+            "user_id": str(request.user_id),
+            "title": request.title
+        }
+
+        # Insert into Supabase
+        # We use .execute() to actually run the command
+        response = supabase.table("conversations").insert(data_to_insert).execute()
+
+        return {"status": "Chat started", "data": response.data}
 
     except Exception as e:
         return {"error": str(e)}
     
-    # chat_history.append(message)
-    # bot_message = ChatMessage(user_id=-1, sender="bot", text="Hello! How can I assist you today?")
-    # #//static data of bot#
-    # chat_history.append(bot_message)
-    # return {"User_message": message, "Bot_message": bot_message}
 
 
 @app.get("/chat_history/")
