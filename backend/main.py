@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from uuid import UUID
 from datetime import datetime
 from typing import Optional
@@ -43,17 +43,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
 class ChatMessage(BaseModel):
     conversation_id: UUID 
     role: str
     content: str
     # We make this optional so the Database can set the default time
     created_at: Optional[datetime] = None
+
 class ChatRequest(BaseModel):
     user_id: UUID
     title: str
-# We can keep this for now, but we are using the DB primarily
-chat_history=[]
+
+# Auth Endpoints
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    try:
+        # Authenticate with Supabase
+        auth_response = supabase.auth.sign_in_with_password({
+            "email": request.email,
+            "password": request.password
+        })
+        
+        # Fetch user profile for role and college_id
+        user_id = auth_response.user.id
+        profile_response = supabase.table("profiles").select("role, college_id").eq("id", user_id).execute()
+        
+        if not profile_response.data:
+            raise HTTPException(status_code=404, detail="User profile not found")
+            
+        profile = profile_response.data[0]
+        
+        return {
+            "access_token": auth_response.session.access_token,
+            "token_type": "bearer",
+            "user_id": user_id,
+            "role": profile["role"],
+            "college_id": profile["college_id"]
+        }
+    except Exception as e:
+        print(f"Login error: {str(e)}") # Debugging
+        if "Invalid login credentials" in str(e):
+            raise HTTPException(status_code=401, detail="Invalid login credentials")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/chat/")
 async def create_chat(message: ChatMessage):
