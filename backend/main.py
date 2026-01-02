@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from uuid import UUID, uuid4
@@ -119,43 +119,90 @@ async def get_chat_history(user_id: UUID):
 
 @app.post("/admin/upload")
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     college_id: str = Form(None),
     current_user: dict = Depends(get_current_user)
 ):
     if current_user["role"] != "college_admin":
         raise HTTPException(status_code=403, detail="Not authorized to upload documents")
-    
+
     target_college_id = current_user["college_id"]
     if not target_college_id:
          raise HTTPException(status_code=400, detail="User is not associated with a college")
 
     try:
+        # Use service client to bypass RLS for storage and DB
+        client = get_service_client()
+        
         file_content = await file.read()
         filename = f"{uuid4()}_{file.filename}"
         path = f"{target_college_id}/{filename}"
+
+        # Upload to Supabase Storage using direct HTTP to ensure Service Key is used
+        import httpx
+        from app.core.database import url as supabase_url, service_key
         
-        # Upload to Supabase Storage
-        storage_response = supabase.storage.from_("documents").upload(path, file_content, {"content-type": file.content_type})
+        storage_url = f"{supabase_url}/storage/v1/object/documents/{path}"
+        headers = {
+            "Authorization": f"Bearer {service_key}",
+            "Content-Type": file.content_type,
+            "x-upsert": "true" 
+        }
         
-        # Insert metadata to DB
+        async with httpx.AsyncClient() as http_client:
+            r = await http_client.post(storage_url, content=file_content, headers=headers, timeout=60.0)
+            if r.status_code not in [200, 201]:
+                 raise Exception(f"Storage Upload Failed: {r.status_code} - {r.text}")
+
+        # Map content_type to expected DB enum/check if needed
+        mime_to_type = {
+            "application/pdf": "pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "text/plain": "txt"
+        }
+        file_type_val = mime_to_type.get(file.content_type, "other")
+
+        # Insert metadata to DB (matching schema exactly)
         doc_data = {
             "college_id": target_college_id,
             "filename": file.filename,
-            "file_path": path,
-            "file_type": file.content_type,
-            "uploaded_by": current_user["user_id"],
+            "storage_path": path,
+            "file_type": file_type_val,
             "status": "processing"
         }
+
+        # Use direct HTTP for DB Insert to ensure Service Key is used
+        db_url = f"{supabase_url}/rest/v1/documents"
+        db_headers = {
+            "Authorization": f"Bearer {service_key}",
+            "ApiKey": service_key,
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
         
-        db_response = supabase.table("documents").insert(doc_data).execute()
+        async with httpx.AsyncClient() as http_client:
+             r_db = await http_client.post(db_url, json=doc_data, headers=db_headers, timeout=10.0)
+             if r_db.status_code not in [200, 201]:
+                 raise Exception(f"DB Insert Failed: {r_db.status_code} - {r_db.text}")
+             
+             db_data = r_db.json()
         
+        document_id = db_data[0]["id"] if db_data else None
+
+        if document_id:
+            # Trigger background task for RAG processing
+            from app.core.rag import process_document
+            background_tasks.add_task(process_document, document_id, path)
+
         return {
             "status": "Upload successful",
-            "document_id": db_response.data[0]["id"] if db_response.data else None
+            "document_id": document_id
         }
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/documents")
@@ -168,7 +215,8 @@ async def get_documents(current_user: dict = Depends(get_current_user)):
          raise HTTPException(status_code=400, detail="User is not associated with a college")
 
     try:
-        response = supabase.table("documents").select("*").eq("college_id", target_college_id).order("created_at", desc=True).execute()
+        client = get_service_client()
+        response = client.table("documents").select("*").eq("college_id", target_college_id).order("created_at", desc=True).execute()
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

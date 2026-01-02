@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import ChatInterface from "./components/ChatInterface"
 import SuperAdminPanel from "./components/SuperAdminPanel"
 import Login from "./components/Login"
@@ -9,12 +9,46 @@ function AppContent() {
   const [showAdmin, setShowAdmin] = useState(false)
   const { user, logout, loading } = useAuth()
 
+  useEffect(() => {
+    if (user?.role === 'super_admin') {
+      setShowAdmin(true);
+    }
+  }, [user]);
+
   if (loading) {
     return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   }
 
   if (!user) {
     return <Login />
+  }
+
+  if (user.role === 'college_admin') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 gap-6 p-4">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-slate-800 mb-2">College Admin Dashboard</h1>
+          <p className="text-slate-600">Your dashboard is hosted on a separate secure portal.</p>
+        </div>
+        
+        <a 
+          href="http://localhost:5174" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold text-lg shadow-xl hover:bg-indigo-700 transition-all hover:scale-105"
+        >
+          Launch Admin Dashboard 
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+        </a>
+
+        <button 
+          onClick={logout} 
+          className="mt-4 text-slate-500 hover:text-red-600 font-semibold underline decoration-2 underline-offset-4 transition-colors"
+        >
+          Sign Out
+        </button>
+      </div>
+    )
   }
 
   if (showAdmin) {

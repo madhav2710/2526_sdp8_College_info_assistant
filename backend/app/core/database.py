@@ -1,7 +1,8 @@
 import os
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from dotenv import load_dotenv
 from pathlib import Path
+import httpx
 
 # Load environment variables from .env file in the backend directory
 env_path = Path(__file__).resolve().parent.parent.parent / '.env'
@@ -14,9 +15,13 @@ service_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not url or not key:
     print("Warning: Supabase credentials not found in environment.")
 
-supabase: Client = create_client(url, key) if url and key else None
+# Set a longer timeout for large file uploads
+timeout = httpx.Timeout(60.0, connect=10.0)
+
+opts = ClientOptions().replace(postgrest_client_timeout=60)
+supabase: Client = create_client(url, key, options=opts) if url and key else None
 
 def get_service_client() -> Client:
     if url and service_key:
-        return create_client(url, service_key)
-    return supabase # Fallback to anon key if service key missing (though ideally should fail or be handled)
+        return create_client(url, service_key, options=opts)
+    return supabase

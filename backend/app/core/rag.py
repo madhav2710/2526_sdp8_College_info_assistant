@@ -40,6 +40,12 @@ async def process_document(document_id: str, file_path: str):
     client = get_service_client() 
     
     try:
+        # 0. Get college_id for this document
+        doc_res = client.table("documents").select("college_id").eq("id", document_id).execute()
+        if not doc_res.data:
+            raise Exception(f"Document {document_id} not found in database")
+        college_id = doc_res.data[0]["college_id"]
+
         # 1. Download file
         file_content = client.storage.from_("documents").download(file_path)
         
@@ -56,6 +62,7 @@ async def process_document(document_id: str, file_path: str):
         # 4. Store Chunk
         chunk_data = {
             "document_id": document_id,
+            "college_id": college_id,
             "content": chunk_text,
             "embedding": embedding
         }

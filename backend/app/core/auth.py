@@ -39,6 +39,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         }
 
     except Exception as e:
+        print(f"DEBUG: Auth Failed: {str(e)}")
+        print(f"DEBUG: Token received: {token[:10]}...")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Could not validate credentials: {str(e)}",
