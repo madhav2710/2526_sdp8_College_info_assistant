@@ -35,9 +35,9 @@
 - [x] Task: Document Upload Backend
     - [x] Subtask: Write Tests: Test file upload endpoint and permission check.
     - [x] Subtask: Implement Feature: Create POST /admin/upload to save file metadata and trigger background task.
-- [ ] Task: RAG Processing (Async)
-    - [ ] Subtask: Write Tests: Test text extraction and embedding generation (mocked).
-    - [ ] Subtask: Implement Feature: Implement background task for text extraction and Supabase vector storage.
+- [x] Task: RAG Processing (Async)
+    - [x] Subtask: Write Tests: Test text extraction and embedding generation (mocked).
+    - [x] Subtask: Implement Feature: Implement background task for text extraction and Supabase vector storage.
 - [ ] Task: Admin Dashboard Frontend
     - [ ] Subtask: Write Tests: Test Dashboard render and file upload interaction.
     - [ ] Subtask: Implement Feature: Build Admin Dashboard for file upload and status viewing.
