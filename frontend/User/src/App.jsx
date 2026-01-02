@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { PromptSuggestionBasic } from "./components/demo"
+import ChatInterface from "./components/ChatInterface"
 import SuperAdminPanel from "./components/SuperAdminPanel"
 import Login from "./components/Login"
 import { AuthProvider, useAuth } from "./context/AuthContext"
@@ -54,7 +54,7 @@ function AppContent() {
            <h1 className="text-3xl font-bold">College Information Chatbot</h1>
            <span className="text-sm text-slate-500">Logged in as: {user.role}</span>
         </div>
-        <PromptSuggestionBasic />
+        <ChatInterface />
       </div>
     </div>
   )

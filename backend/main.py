@@ -49,6 +49,7 @@ class LoginRequest(BaseModel):
 
 class ChatMessage(BaseModel):
     conversation_id: UUID 
+    user_id: UUID # Added for auto-creation
     role: str
     content: str
     # We make this optional so the Database can set the default time
@@ -85,7 +86,6 @@ async def login(request: LoginRequest):
             "college_id": profile["college_id"]
         }
     except Exception as e:
-        print(f"Login error: {str(e)}") # Debugging
         if "Invalid login credentials" in str(e):
             raise HTTPException(status_code=401, detail="Invalid login credentials")
         raise HTTPException(status_code=400, detail=str(e))
@@ -93,52 +93,64 @@ async def login(request: LoginRequest):
 @app.post("/chat/")
 async def create_chat(message: ChatMessage):
     try:
-        # Create a dictionary for Supabase
-        # We convert the UUID to a string to be safe
+        # Use Service Role Key for background/system tasks to ensure reliability
+        # In a production app, we would use proper RLS and session-based client
+        service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        client: Client = create_client(url, service_key) if service_key else supabase
+
+        # 1. Ensure conversation exists
+        conv_check = client.table("conversations").select("id").eq("id", str(message.conversation_id)).execute()
+        
+        if not conv_check.data:
+            # Get user's college_id for the conversation record
+            profile = client.table("profiles").select("college_id").eq("id", str(message.user_id)).execute()
+            college_id = profile.data[0]["college_id"] if profile.data else None
+            
+            client.table("conversations").insert({
+                "id": str(message.conversation_id),
+                "user_id": str(message.user_id),
+                "college_id": college_id,
+                "title": message.content[:50] + "..."
+            }).execute()
+
+        # 2. Insert the data into the 'messages' table
         data_to_insert = {
             "conversation_id": str(message.conversation_id),
             "role": message.role,
             "content": message.content
         }
+        response = client.table("messages").insert(data_to_insert).execute()
 
-        # Insert the data into the 'messages' table
-        response = supabase.table("messages").insert(data_to_insert).execute()
-
-        return {"status": "Message sent", "data": response.data}
-
-    except Exception as e:
-        error_msg = str(e)
-        # Provide more helpful error messages for common issues
-        if "Invalid API key" in error_msg or "401" in error_msg:
-            return {
-                "error": "Invalid Supabase API key. Please check your .env file and ensure 'supabase_key' is set correctly.",
-                "details": error_msg
-            }
-        return {"error": error_msg}
-# 2. The Start Chat Endpoint
-@app.post("/start_chat/")
-async def start_chat(request: ChatRequest):
-    try:
-        # Prepare the data dictionary
-        data_to_insert = {
-            "user_id": str(request.user_id),
-            "title": request.title
+        # Mock result to confirm message received and stored (as per requirement)
+        mock_response = {
+            "role": "assistant",
+            "content": f"Mock response for query: {message.content}",
+            "conversation_id": str(message.conversation_id)
         }
 
-        # Insert into Supabase
-        # We use .execute() to actually run the command
-        response = supabase.table("conversations").insert(data_to_insert).execute()
-
-        return {"status": "Chat started", "data": response.data}
+        return {
+            "status": "Message sent", 
+            "data": response.data,
+            "mock_response": mock_response
+        }
 
     except Exception as e:
         return {"error": str(e)}
-    
 
+@app.get("/chat/history/")
+async def get_chat_history(user_id: UUID):
+    try:
+        # 1. Get all conversations for this user
+        conv_response = supabase.table("conversations").select("*").eq("user_id", str(user_id)).order("created_at", desc=True).execute()
+        
+        # 2. For each conversation, get messages (Simplified for MVP)
+        # In a real app, we might just return the list of conversations
+        # or have a separate endpoint for messages. 
+        # For now, let's return the list of conversations.
+        return conv_response.data
 
-@app.get("/chat_history/")
-async def get_chat_history():
-    return chat_history
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/")
 async def root():
