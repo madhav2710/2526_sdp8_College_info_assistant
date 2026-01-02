@@ -158,6 +158,21 @@ async def upload_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/admin/documents")
+async def get_documents(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "college_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view documents")
+    
+    target_college_id = current_user["college_id"]
+    if not target_college_id:
+         raise HTTPException(status_code=400, detail="User is not associated with a college")
+
+    try:
+        response = supabase.table("documents").select("*").eq("college_id", target_college_id).order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to Our Application!"}

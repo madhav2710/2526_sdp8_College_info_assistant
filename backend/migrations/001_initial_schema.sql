@@ -70,3 +70,22 @@ ALTER TABLE document_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
+-- Profiles Policies
+-- Allow users to insert their own profile
+CREATE POLICY "Users can insert their own profile" 
+ON profiles FOR INSERT 
+WITH CHECK (auth.uid() = id);
+
+-- Allow users to read their own profile
+CREATE POLICY "Users can view their own profile" 
+ON profiles FOR SELECT 
+USING (auth.uid() = id);
+
+-- Allow everyone to read colleges (public info)
+CREATE POLICY "Colleges are viewable by everyone" 
+ON colleges FOR SELECT 
+USING (true);
+
+-- Allow super admins (or seeding scripts with service role) to do everything
+-- Note: Service role bypasses RLS automatically, but explicit policies help clarity
+

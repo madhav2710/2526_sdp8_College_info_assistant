@@ -38,11 +38,10 @@
 - [x] Task: RAG Processing (Async)
     - [x] Subtask: Write Tests: Test text extraction and embedding generation (mocked).
     - [x] Subtask: Implement Feature: Implement background task for text extraction and Supabase vector storage.
-- [ ] Task: Admin Dashboard Frontend
-    - [ ] Subtask: Write Tests: Test Dashboard render and file upload interaction.
-    - [ ] Subtask: Implement Feature: Build Admin Dashboard for file upload and status viewing.
-- [ ] Task: Conductor - User Manual Verification 'Admin Document Pipeline' (Protocol in workflow.md)
-
+- [x] Task: Admin Dashboard Frontend
+    - [x] Subtask: Write Tests: Test Dashboard render and file upload interaction.
+    - [x] Subtask: Implement Feature: Build Admin Dashboard for file upload and status viewing.
+- [~] Task: Conductor - User Manual Verification 'Admin Document Pipeline' (Protocol in workflow.md)      
 ## Phase 5: Super Admin & Polish
 
 - [ ] Task: Super Admin Backend

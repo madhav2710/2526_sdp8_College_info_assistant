@@ -53,14 +53,18 @@ const INITIAL_HISTORY = [
 const StatusBadge = ({ status }) => {
   const styles = {
     Ingested: 'bg-green-100 text-green-700 border-green-200',
+    Completed: 'bg-green-100 text-green-700 border-green-200',
     Pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+    Processing: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     Ingesting: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     Failed: 'bg-red-100 text-red-700 border-red-200'
   };
 
   const icons = {
     Ingested: <CheckCircle size={14} className="mr-1" />,
+    Completed: <CheckCircle size={14} className="mr-1" />,
     Pending: <Clock size={14} className="mr-1" />,
+    Processing: <RefreshCw size={14} className="mr-1 animate-spin" />,
     Ingesting: <RefreshCw size={14} className="mr-1 animate-spin" />,
     Failed: <AlertCircle size={14} className="mr-1" />
   };
@@ -74,19 +78,93 @@ const StatusBadge = ({ status }) => {
 };
 
 const App = () => {
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('admin_token'));
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [documents, setDocuments] = useState(INITIAL_DOCS);
+  const [documents, setDocuments] = useState([]);
   const [history, setHistory] = useState(INITIAL_HISTORY);
   const [searchTerm, setSearchTerm] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [notification, setNotification] = useState(null);
 
+  const API_BASE_URL = 'http://localhost:8000'; // Adjust as needed
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.role === 'college_admin') {
+          localStorage.setItem('admin_token', data.access_token);
+          localStorage.setItem('admin_college_id', data.college_id);
+          setIsAuthenticated(true);
+        } else {
+          setLoginError('Access denied. You must be a college admin.');
+        }
+      } else {
+        const errData = await response.json();
+        setLoginError(errData.detail || 'Login failed');
+      }
+    } catch (error) {
+      setLoginError('Could not connect to server.');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_college_id');
+    setIsAuthenticated(false);
+  };
+
+  // Fetch documents from API
+  const fetchDocuments = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/documents`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments(data.map(doc => ({
+          id: doc.id,
+          name: doc.filename,
+          type: doc.file_type.includes('pdf') ? 'PDF' : 'Document',
+          size: 'Unknown', // Backend doesn't store size yet
+          status: doc.status.charAt(0).toUpperCase() + doc.status.slice(1),
+          date: doc.created_at ? doc.created_at.split('T')[0] : 'N/A'
+        })));
+      }
+    } catch (error) {
+      console.error('Error fetching documents:', error);
+    }
+  };
+
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      fetchDocuments();
+      // Poll for updates every 10 seconds to see status changes
+      const interval = setInterval(fetchDocuments, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated]);
+
   // Stats calculation
   const stats = useMemo(
     () => ({
       total: documents.length,
-      ingested: documents.filter((d) => d.status === 'Ingested').length,
-      pending: documents.filter((d) => d.status === 'Pending').length,
+      ingested: documents.filter((d) => d.status === 'Completed' || d.status === 'Ingested').length,
+      pending: documents.filter((d) => d.status === 'Processing' || d.status === 'Pending').length,
       failed: documents.filter((d) => d.status === 'Failed').length
     }),
     [documents]
@@ -97,25 +175,43 @@ const App = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleFileUpload = (e) => {
-    setIsUploading(true);
+  const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-    // Simulate upload delay
-    setTimeout(() => {
-      const newDocs = files.map((file) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        name: file.name,
-        type: file.name.toLowerCase().includes('syllabus') ? 'Syllabus' : 'Other',
-        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-        status: 'Pending',
-        date: new Date().toISOString().split('T')[0]
-      }));
+    setIsUploading(true);
+    let successCount = 0;
 
-      setDocuments((prev) => [...newDocs, ...prev]);
-      setIsUploading(false);
-      showNotification(`Successfully uploaded ${files.length} documents.`);
-    }, 1500);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/admin/upload`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
+          },
+          body: formData
+        });
+
+        if (response.ok) {
+          successCount++;
+        } else {
+          console.error('Upload failed for', file.name);
+        }
+      } catch (error) {
+        console.error('Error uploading file:', error);
+      }
+    }
+
+    setIsUploading(false);
+    if (successCount > 0) {
+      showNotification(`Successfully uploaded ${successCount} documents.`);
+      fetchDocuments();
+    } else {
+      showNotification('Failed to upload documents.', 'error');
+    }
   };
 
   const triggerIngestion = (id) => {
@@ -132,6 +228,62 @@ const App = () => {
     setDocuments((prev) => prev.filter((doc) => doc.id !== id));
     showNotification('Document removed from records.', 'error');
   };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 font-sans">
+        <div className="w-full max-w-md bg-white p-8 rounded-2xl border border-slate-200 shadow-xl">
+          <div className="flex items-center gap-3 mb-8 justify-center">
+            <div className="bg-indigo-600 p-2 rounded-lg">
+              <Database className="text-white" size={24} />
+            </div>
+            <span className="font-bold text-2xl tracking-tight text-slate-800">EduQuery Admin</span>
+          </div>
+          
+          <h2 className="text-xl font-bold text-center text-slate-800 mb-2">Welcome Back</h2>
+          <p className="text-center text-slate-500 text-sm mb-8">Sign in to manage your college knowledge base.</p>
+
+          {loginError && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-100 text-red-700 text-sm rounded-xl flex items-center gap-2">
+              <AlertCircle size={16} />
+              {loginError}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Email Address</label>
+              <input
+                type="email"
+                required
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                placeholder="admin@college.edu"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Password</label>
+              <input
+                type="password"
+                required
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                placeholder="••••••••"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+              />
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-100"
+            >
+              Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 flex">
@@ -180,9 +332,12 @@ const App = () => {
               <ShieldCheck size={16} className="text-indigo-400" />
               <span className="text-xs font-medium uppercase tracking-wider opacity-70">College Account</span>
             </div>
-            <p className="text-sm font-semibold truncate">St. Xavier&apos;s Institute</p>
-            <button className="mt-3 w-full py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs transition-colors">
-              Manage API Keys
+            <p className="text-sm font-semibold truncate">Admin Panel</p>
+            <button 
+              onClick={handleLogout}
+              className="mt-3 w-full py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs transition-colors"
+            >
+              Sign Out
             </button>
           </div>
         </div>
