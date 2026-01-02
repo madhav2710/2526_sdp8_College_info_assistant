@@ -1,0 +1,10 @@
+# Conductor generated files
+conductor/
+
+# Gemini context files
+.gemini/
+.gemini_security/
+
+# OS generated files
+.DS_Store
+Thumbs.db
