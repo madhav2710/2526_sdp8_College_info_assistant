@@ -73,14 +73,19 @@ async def create_chat(message: ChatMessage):
     try:
         client = get_service_client()
 
-        # 1. Ensure conversation exists
+        # 1. Get user's college_id
+        profile = client.table("profiles").select("college_id").eq("id", str(message.user_id)).execute()
+        if not profile.data:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        
+        college_id = profile.data[0]["college_id"]
+        if not college_id:
+            raise HTTPException(status_code=400, detail="User is not associated with a college")
+
+        # 2. Ensure conversation exists
         conv_check = client.table("conversations").select("id").eq("id", str(message.conversation_id)).execute()
         
         if not conv_check.data:
-            # Get user's college_id for the conversation record
-            profile = client.table("profiles").select("college_id").eq("id", str(message.user_id)).execute()
-            college_id = profile.data[0]["college_id"] if profile.data else None
-            
             client.table("conversations").insert({
                 "id": str(message.conversation_id),
                 "user_id": str(message.user_id),
@@ -88,29 +93,47 @@ async def create_chat(message: ChatMessage):
                 "title": message.content[:50] + "..."
             }).execute()
 
-        # 2. Insert the data into the 'messages' table
-        data_to_insert = {
+        # 3. Insert the user message into the 'messages' table
+        user_message_data = {
             "conversation_id": str(message.conversation_id),
-            "role": message.role,
+            "role": "user",
             "content": message.content
         }
-        response = client.table("messages").insert(data_to_insert).execute()
+        user_message_response = client.table("messages").insert(user_message_data).execute()
 
-        # Mock result
-        mock_response = {
+        # 4. Generate RAG response using the new retrieval system
+        from app.core.rag import generate_rag_response
+        
+        rag_result = await generate_rag_response(
+            query=message.content,
+            college_id=college_id
+        )
+        
+        # 5. Store the assistant's response
+        assistant_message_data = {
+            "conversation_id": str(message.conversation_id),
             "role": "assistant",
-            "content": f"Mock response for query: {message.content}",
-            "conversation_id": str(message.conversation_id)
+            "content": rag_result["response"],
+            "sources": rag_result.get("sources", [])  # Store sources as JSONB
         }
+        assistant_message_response = client.table("messages").insert(assistant_message_data).execute()
 
+        # 6. Return response with sources
         return {
-            "status": "Message sent", 
-            "data": response.data,
-            "mock_response": mock_response
+            "status": "Message sent",
+            "role": "assistant",
+            "content": rag_result["response"],
+            "sources": rag_result.get("sources", []),
+            "conversation_id": str(message.conversation_id),
+            "chunks_used": rag_result.get("chunks_used", 0)
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing chat message: {str(e)}")
 
 @app.get("/chat/history/")
 async def get_chat_history(user_id: UUID):
