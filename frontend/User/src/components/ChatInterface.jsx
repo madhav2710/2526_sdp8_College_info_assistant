@@ -55,9 +55,14 @@ const ChatInterface = () => {
 
             const data = await response.json();
             
-            if (data.mock_response) {
-                setMessages(prev => [...prev, data.mock_response]);
-            }
+            // Handle new RAG response format
+            const assistantMessage = {
+                role: 'assistant',
+                content: data.content || data.response || "No response received",
+                sources: data.sources || []
+            };
+            
+            setMessages(prev => [...prev, assistantMessage]);
         } catch (error) {
             console.error("Error sending message:", error);
             setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error.message}` }]);
@@ -76,15 +81,21 @@ const ChatInterface = () => {
                     </div>
                 )}
                 {messages.map((msg, i) => (
-                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                         <div className={`flex max-w-[80%] items-start space-x-2 rounded-lg p-3 ${
                             msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-800'
                         }`}>
                             <div className="mt-1">
                                 {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
                             </div>
-                            <div className="text-sm">{msg.content}</div>
+                            <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
                         </div>
+                        {/* Show sources if available */}
+                        {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                            <div className="mt-1 px-2 text-xs text-slate-500">
+                                Sources: {msg.sources.join(', ')}
+                            </div>
+                        )}
                     </div>
                 ))}
                 <div ref={messagesEndRef} />

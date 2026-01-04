@@ -13,7 +13,7 @@ key: str = os.getenv("supabase_key")
 service_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not url or not key:
-    print("Warning: Supabase credentials not found in environment.")
+    raise ValueError("Supabase credentials not found in environment.")
 
 # Set a longer timeout for large file uploads
 timeout = httpx.Timeout(60.0, connect=10.0)
