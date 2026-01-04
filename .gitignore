@@ -5,10 +5,18 @@ conductor/
 .gemini/
 .gemini_security/
 
+# Kiro AI assistant files
+.kiro/
+
 # OS generated files
 .DS_Store
 Thumbs.db
 
+# Testing and debugging
+.coverage
+.pytest_cache/
+*.log
+*.tmp
 
 #Ignore vscode AI rules
 .github\instructions\codacy.instructions.md

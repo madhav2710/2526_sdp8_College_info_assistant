@@ -14,3 +14,16 @@ __pycache__/
 venv/
 env/
 ENV/
+
+# Testing and debugging
+.pytest_cache/
+.coverage
+*.log
+*.tmp
+test_*.py
+*_test.py
+debug_*.py
+inspect_*.py
+check_*.py
+verify_*.py
+seed_*.py
