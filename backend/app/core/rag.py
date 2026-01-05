@@ -59,8 +59,10 @@ def chunk_text(text: str, chunk_size: int = 1500, chunk_overlap: int = 300) -> L
     if current_chunk.strip():
         chunks.append(current_chunk.strip())
     
-    # Fallback: if sentence splitting didn't work well, use simple character-based splitting
-    if len(chunks) == 0:
+    # Fallback: if sentence splitting didn't work well (no chunks or oversized chunks), 
+    # use simple character-based splitting
+    if len(chunks) == 0 or any(len(chunk) > chunk_size for chunk in chunks):
+        chunks = []
         for i in range(0, len(text), chunk_size - chunk_overlap):
             chunk = text[i:i + chunk_size]
             if chunk.strip():
