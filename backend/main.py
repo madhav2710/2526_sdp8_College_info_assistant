@@ -9,7 +9,11 @@ from app.core.database import supabase, get_service_client
 from app.core.auth import get_current_user
 from app.core.notifications import notification_manager
 from app.models.notification import NotificationFilters, NotificationType
+from app.core.workflow import validate_status_transition, log_status_change
+from app.core.basic_chat import generate_basic_response
 import os
+import hashlib
+import mimetypes
 
 app = FastAPI()
 
@@ -36,6 +40,77 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     user_id: UUID
     title: str
+
+# File validation constants
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.txt'}
+ALLOWED_MIME_TYPES = {
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain'
+}
+
+def validate_file(file: UploadFile, file_content: bytes) -> tuple[bool, Optional[str]]:
+    """
+    Validate uploaded file.
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    # Check file size
+    if len(file_content) > MAX_FILE_SIZE:
+        return False, f"File exceeds {MAX_FILE_SIZE / (1024*1024):.0f}MB limit"
+    
+    if len(file_content) == 0:
+        return False, "File is empty"
+    
+    # Check file extension
+    file_ext = None
+    if file.filename:
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            return False, f"Only {', '.join(ALLOWED_EXTENSIONS)} files are allowed"
+    
+    # Check MIME type
+    if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
+        return False, f"Invalid file type. Allowed types: {', '.join(ALLOWED_MIME_TYPES)}"
+    
+    # Verify MIME type matches extension
+    if file_ext and file.content_type:
+        expected_mime = mimetypes.guess_type(file.filename)[0]
+        if expected_mime and expected_mime != file.content_type:
+            return False, "File type mismatch. Please ensure the file extension matches the file content."
+    
+    # Try to read file to check for corruption (basic check)
+    try:
+        if file_ext == '.pdf':
+            from io import BytesIO
+            from pypdf import PdfReader
+            reader = PdfReader(BytesIO(file_content))
+            if len(reader.pages) == 0:
+                return False, "PDF file appears to be corrupted or empty"
+    except Exception as e:
+        return False, f"File validation failed: {str(e)}"
+    
+    return True, None
+
+def calculate_file_hash(file_content: bytes) -> str:
+    """Calculate SHA256 hash of file content for duplicate detection."""
+    return hashlib.sha256(file_content).hexdigest()
+
+class DocumentApprovalRequest(BaseModel):
+    document_id: UUID
+    comments: Optional[str] = None
+    process_schedule: Optional[str] = 'immediate'  # 'immediate', 'scheduled', 'manual'
+    scheduled_at: Optional[datetime] = None
+
+class DocumentRejectionRequest(BaseModel):
+    document_id: UUID
+    reason: str
+
+class ScheduleProcessingRequest(BaseModel):
+    document_id: UUID
+    scheduled_at: datetime
 
 # Auth Endpoints
 @app.post("/auth/login")
@@ -101,13 +176,21 @@ async def create_chat(message: ChatMessage):
         }
         user_message_response = client.table("messages").insert(user_message_data).execute()
 
-        # 4. Generate RAG response using the new retrieval system
-        from app.core.rag import generate_rag_response
-        
-        rag_result = await generate_rag_response(
-            query=message.content,
-            college_id=college_id
-        )
+        # 4. Generate response (using basic chat for prototype, RAG can be enabled later)
+        # Try RAG first, fallback to basic chat if RAG is not available
+        try:
+            from app.core.rag import generate_rag_response
+            rag_result = await generate_rag_response(
+                query=message.content,
+                college_id=college_id
+            )
+        except Exception as e:
+            # Fallback to basic chat if RAG fails
+            print(f"RAG not available, using basic chat: {str(e)}")
+            rag_result = await generate_basic_response(
+                query=message.content,
+                college_id=college_id
+            )
         
         # 5. Store the assistant's response
         assistant_message_data = {
@@ -157,13 +240,31 @@ async def upload_document(
     if not target_college_id:
          raise HTTPException(status_code=400, detail="User is not associated with a college")
 
+    file_id = None
     try:
         # Use service client to bypass RLS for storage and DB
         client = get_service_client()
         
+        # Read and validate file
         file_content = await file.read()
-        file_size = len(file_content)  # Calculate file size
-        filename = f"{uuid4()}_{file.filename}"
+        file_size = len(file_content)
+        
+        # Validate file
+        is_valid, error_msg = validate_file(file, file_content)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Check for duplicate files (same hash + college_id)
+        file_hash = calculate_file_hash(file_content)
+        existing_docs = client.table("documents").select("id").eq("college_id", target_college_id).eq("file_hash", file_hash).execute()
+        if existing_docs.data:
+            raise HTTPException(status_code=400, detail="A file with identical content already exists. Please upload a different file.")
+        
+        # Sanitize filename
+        original_filename = file.filename or "document"
+        # Remove special characters but keep extension
+        safe_filename = "".join(c for c in original_filename if c.isalnum() or c in "._- ")
+        filename = f"{uuid4()}_{safe_filename}"
         path = f"{target_college_id}/{filename}"
 
         # Upload to Supabase Storage using direct HTTP to ensure Service Key is used
@@ -181,6 +282,7 @@ async def upload_document(
             r = await http_client.post(storage_url, content=file_content, headers=headers, timeout=60.0)
             if r.status_code not in [200, 201]:
                  raise HTTPException(status_code=400, detail=f"File upload failed: {r.text}")
+            file_id = path  # Store path for cleanup if needed
 
         # Map content_type to expected DB enum/check if needed
         mime_to_type = {
@@ -193,12 +295,15 @@ async def upload_document(
         # Insert metadata to DB with enhanced tracking
         doc_data = {
             "college_id": target_college_id,
-            "filename": file.filename,
+            "filename": original_filename,
             "storage_path": path,
             "file_type": file_type_val,
             "file_size": file_size,
             "uploaded_by": current_user["user_id"],
-            "status": "pending_approval"  # Changed to require approval before processing
+            "status": "pending_approval",  # Changed to require approval before processing
+            "file_hash": file_hash,
+            "validated_at": datetime.now(dt.UTC).isoformat(),
+            "process_schedule": "manual"  # Default to manual processing
         }
 
         # Use direct HTTP for DB Insert to ensure Service Key is used
@@ -220,7 +325,28 @@ async def upload_document(
         document_record = db_data[0] if db_data else None
         
         if not document_record:
+            # Rollback: Delete file if uploaded but DB insert failed
+            if file_id:
+                try:
+                    delete_url = f"{supabase_url}/storage/v1/object/documents/{file_id}"
+                    async with httpx.AsyncClient() as http_client:
+                        await http_client.delete(delete_url, headers=headers, timeout=10.0)
+                except Exception as cleanup_error:
+                    print(f"Warning: Failed to cleanup orphaned file: {cleanup_error}")
             raise HTTPException(status_code=500, detail="Failed to create document record")
+        
+        # Log status change
+        try:
+            log_status_change(
+                client=client,
+                document_id=document_record["id"],
+                old_status="uploaded",
+                new_status="pending_approval",
+                changed_by=current_user["user_id"],
+                comments="Document uploaded"
+            )
+        except Exception as log_error:
+            print(f"Warning: Failed to log status change: {log_error}")
 
         # Create notification for super admins about new document upload
         try:
@@ -263,6 +389,17 @@ async def upload_document(
     except HTTPException:
         raise
     except Exception as e:
+        # Rollback: Delete file if uploaded but operation failed
+        if file_id:
+            try:
+                import httpx
+                from app.core.database import url as supabase_url, service_key
+                delete_url = f"{supabase_url}/storage/v1/object/documents/{file_id}"
+                headers = {"Authorization": f"Bearer {service_key}"}
+                async with httpx.AsyncClient() as http_client:
+                    await http_client.delete(delete_url, headers=headers, timeout=10.0)
+            except Exception as cleanup_error:
+                print(f"Warning: Failed to cleanup orphaned file: {cleanup_error}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
@@ -462,10 +599,6 @@ async def get_pending_documents(current_user: dict = Depends(get_current_user)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to retrieve pending documents: {str(e)}")
 
-class DocumentApprovalRequest(BaseModel):
-    document_id: UUID
-    comments: Optional[str] = None
-
 @app.post("/super-admin/approve-document")
 async def approve_document(
     request: DocumentApprovalRequest,
@@ -485,17 +618,36 @@ async def approve_document(
             raise HTTPException(status_code=404, detail="Document not found")
         
         document = doc_query.data[0]
+        current_status = document["status"]
         
-        if document["status"] not in ["uploaded", "pending_approval"]:
-            raise HTTPException(status_code=400, detail=f"Document cannot be approved. Current status: {document['status']}")
+        # Validate status transition
+        if not validate_status_transition(current_status, "approved"):
+            raise HTTPException(status_code=400, detail=f"Invalid status transition from {current_status} to approved")
+        
+        # Validate process_schedule
+        if request.process_schedule not in ['immediate', 'scheduled', 'manual']:
+            raise HTTPException(status_code=400, detail="Invalid process_schedule. Must be 'immediate', 'scheduled', or 'manual'")
+        
+        # Validate scheduled_at if process_schedule is 'scheduled'
+        if request.process_schedule == 'scheduled':
+            if not request.scheduled_at:
+                raise HTTPException(status_code=400, detail="scheduled_at is required when process_schedule is 'scheduled'")
+            if request.scheduled_at <= datetime.now(dt.UTC):
+                raise HTTPException(status_code=400, detail="scheduled_at must be in the future")
         
         # Update document status to 'approved' and add approval metadata
         update_data = {
             "status": "approved",
             "approved_by": current_user["user_id"],
             "approval_comments": request.comments,
-            "updated_at": datetime.now(dt.UTC).isoformat()
+            "updated_at": datetime.now(dt.UTC).isoformat(),
+            "process_schedule": request.process_schedule,
+            "scheduled_at": request.scheduled_at.isoformat() if request.scheduled_at else None
         }
+        
+        # If immediate processing, trigger it
+        if request.process_schedule == 'immediate':
+            update_data["status"] = "processing"  # Move directly to processing
         
         # Use direct HTTP for DB update to ensure Service Key is used
         from app.core.database import url as supabase_url, service_key
@@ -531,9 +683,23 @@ async def approve_document(
                 # Log but don't fail the approval if approval record creation fails
                 print(f"Warning: Failed to create approval record: {r_approval.text}")
         
-        # Trigger RAG processing in background task
-        from app.core.rag import trigger_rag_processing
-        background_tasks.add_task(trigger_rag_processing, str(request.document_id))
+        # Log status change
+        try:
+            log_status_change(
+                client=client,
+                document_id=str(request.document_id),
+                old_status=current_status,
+                new_status=update_data["status"],
+                changed_by=current_user["user_id"],
+                comments=request.comments
+            )
+        except Exception as log_error:
+            print(f"Warning: Failed to log status change: {log_error}")
+        
+        # Trigger RAG processing only if immediate
+        if request.process_schedule == 'immediate':
+            from app.core.rag import trigger_rag_processing
+            background_tasks.add_task(trigger_rag_processing, str(request.document_id))
         
         # Create notification for college admin about document approval
         try:
@@ -554,11 +720,13 @@ async def approve_document(
         
         return {
             "status": "success",
-            "message": f"Document '{document['filename']}' has been approved for processing",
+            "message": f"Document '{document['filename']}' has been approved. Processing: {request.process_schedule}",
             "document": {
                 "id": str(request.document_id),
                 "filename": document["filename"],
-                "status": "approved",
+                "status": update_data["status"],
+                "process_schedule": request.process_schedule,
+                "scheduled_at": request.scheduled_at.isoformat() if request.scheduled_at else None,
                 "approved_by": current_user["user_id"],
                 "approval_comments": request.comments,
                 "approved_at": update_data["updated_at"]
@@ -594,9 +762,11 @@ async def reject_document(
             raise HTTPException(status_code=404, detail="Document not found")
         
         document = doc_query.data[0]
+        current_status = document["status"]
         
-        if document["status"] not in ["uploaded", "pending_approval"]:
-            raise HTTPException(status_code=400, detail=f"Document cannot be rejected. Current status: {document['status']}")
+        # Validate status transition
+        if not validate_status_transition(current_status, "rejected"):
+            raise HTTPException(status_code=400, detail=f"Invalid status transition from {current_status} to rejected")
         
         # Update document status to 'rejected' and add rejection metadata
         update_data = {
@@ -605,6 +775,19 @@ async def reject_document(
             "approval_comments": request.reason,
             "updated_at": datetime.now(dt.UTC).isoformat()
         }
+        
+        # Log status change
+        try:
+            log_status_change(
+                client=client,
+                document_id=str(request.document_id),
+                old_status=current_status,
+                new_status="rejected",
+                changed_by=current_user["user_id"],
+                comments=request.reason
+            )
+        except Exception as log_error:
+            print(f"Warning: Failed to log status change: {log_error}")
         
         # Use direct HTTP for DB update to ensure Service Key is used
         from app.core.database import url as supabase_url, service_key
@@ -676,6 +859,205 @@ async def reject_document(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Rejection failed: {str(e)}")
+
+@app.post("/super-admin/schedule-document-processing")
+async def schedule_document_processing(
+    request: ScheduleProcessingRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Schedule document processing for a future time."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to schedule processing")
+    
+    try:
+        client = get_service_client()
+        
+        # Verify document exists and is approved
+        doc_query = client.table("documents").select("*").eq("id", str(request.document_id)).execute()
+        if not doc_query.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        document = doc_query.data[0]
+        if document["status"] != "approved":
+            raise HTTPException(status_code=400, detail=f"Document must be approved to schedule processing. Current status: {document['status']}")
+        
+        # Validate scheduled_at is in the future
+        if request.scheduled_at <= datetime.now(dt.UTC):
+            raise HTTPException(status_code=400, detail="scheduled_at must be in the future")
+        
+        # Update document with scheduled processing
+        update_data = {
+            "process_schedule": "scheduled",
+            "scheduled_at": request.scheduled_at.isoformat(),
+            "updated_at": datetime.now(dt.UTC).isoformat()
+        }
+        
+        from app.core.database import url as supabase_url, service_key
+        import httpx
+        
+        db_url = f"{supabase_url}/rest/v1/documents?id=eq.{request.document_id}"
+        db_headers = {
+            "Authorization": f"Bearer {service_key}",
+            "ApiKey": service_key,
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+        
+        async with httpx.AsyncClient() as http_client:
+            r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=10.0)
+            if r_db.status_code not in [200, 201]:
+                raise HTTPException(status_code=500, detail=f"Database update error: {r_db.text}")
+            
+            updated_doc = r_db.json()
+        
+        return {
+            "status": "success",
+            "message": f"Document '{document['filename']}' scheduled for processing",
+            "document": {
+                "id": str(request.document_id),
+                "filename": document["filename"],
+                "process_schedule": "scheduled",
+                "scheduled_at": request.scheduled_at.isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Scheduling failed: {str(e)}")
+
+class TriggerProcessingRequest(BaseModel):
+    document_id: UUID
+
+@app.post("/super-admin/trigger-processing")
+async def trigger_processing(
+    request: TriggerProcessingRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """Manually trigger processing for an approved document."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to trigger processing")
+    
+    try:
+        client = get_service_client()
+        
+        # Verify document exists and is approved
+        doc_query = client.table("documents").select("*").eq("id", str(request.document_id)).execute()
+        if not doc_query.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        document = doc_query.data[0]
+        current_status = document["status"]
+        
+        # Validate status transition
+        if current_status != "approved":
+            raise HTTPException(status_code=400, detail=f"Document must be approved to trigger processing. Current status: {current_status}")
+        
+        # Update status to processing
+        update_data = {
+            "status": "processing",
+            "process_schedule": "manual",
+            "updated_at": datetime.now(dt.UTC).isoformat()
+        }
+        
+        from app.core.database import url as supabase_url, service_key
+        import httpx
+        
+        db_url = f"{supabase_url}/rest/v1/documents?id=eq.{request.document_id}"
+        db_headers = {
+            "Authorization": f"Bearer {service_key}",
+            "ApiKey": service_key,
+            "Content-Type": "application/json",
+            "Prefer": "return=representation"
+        }
+        
+        async with httpx.AsyncClient() as http_client:
+            r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=10.0)
+            if r_db.status_code not in [200, 201]:
+                raise HTTPException(status_code=500, detail=f"Database update error: {r_db.text}")
+        
+        # Log status change
+        try:
+            log_status_change(
+                client=client,
+                document_id=str(request.document_id),
+                old_status=current_status,
+                new_status="processing",
+                changed_by=current_user["user_id"],
+                comments="Manual processing trigger"
+            )
+        except Exception as log_error:
+            print(f"Warning: Failed to log status change: {log_error}")
+        
+        # Trigger RAG processing
+        from app.core.rag import trigger_rag_processing
+        background_tasks.add_task(trigger_rag_processing, str(request.document_id))
+        
+        return {
+            "status": "success",
+            "message": f"Processing triggered for document '{document['filename']}'",
+            "document": {
+                "id": str(request.document_id),
+                "filename": document["filename"],
+                "status": "processing"
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Trigger processing failed: {str(e)}")
+
+@app.get("/super-admin/scheduled-documents")
+async def get_scheduled_documents(current_user: dict = Depends(get_current_user)):
+    """Get all documents scheduled for processing."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view scheduled documents")
+    
+    try:
+        client = get_service_client()
+        
+        # Get all scheduled documents
+        query = (client.table("documents")
+                .select("id, filename, file_type, file_size, college_id, scheduled_at, created_at")
+                .eq("process_schedule", "scheduled")
+                .eq("status", "approved")
+                .order("scheduled_at", desc=False))
+        
+        response = query.execute()
+        
+        scheduled_documents = []
+        for doc in response.data:
+            # Get college name
+            college_query = client.table("colleges").select("name").eq("id", doc["college_id"])
+            college_response = college_query.execute()
+            college_name = college_response.data[0]["name"] if college_response.data else "Unknown College"
+            
+            scheduled_documents.append({
+                "id": doc["id"],
+                "filename": doc["filename"],
+                "file_type": doc["file_type"],
+                "file_size": doc["file_size"],
+                "college_id": doc["college_id"],
+                "college_name": college_name,
+                "scheduled_at": doc["scheduled_at"],
+                "created_at": doc["created_at"]
+            })
+        
+        return {
+            "scheduled_documents": scheduled_documents,
+            "total_scheduled": len(scheduled_documents)
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve scheduled documents: {str(e)}")
 
 # Notification Endpoints
 @app.get("/notifications")
