@@ -572,10 +572,13 @@ async def get_pending_documents(current_user: dict = Depends(get_current_user)):
             college_response = college_query.execute()
             college_name = college_response.data[0]["name"] if college_response.data else "Unknown College"
             
-            # Get uploader email
-            uploader_query = client.table("profiles").select("email").eq("id", doc["uploaded_by"])
-            uploader_response = uploader_query.execute()
-            uploader_email = uploader_response.data[0]["email"] if uploader_response.data else "Unknown User"
+            # Get uploader display name (profiles table has full_name, not email)
+            uploader_name = "Unknown User"
+            if doc.get("uploaded_by"):
+                uploader_query = client.table("profiles").select("full_name").eq("id", doc["uploaded_by"])
+                uploader_response = uploader_query.execute()
+                if uploader_response.data:
+                    uploader_name = uploader_response.data[0].get("full_name") or uploader_name
             
             pending_documents.append({
                 "id": doc["id"],
@@ -585,7 +588,8 @@ async def get_pending_documents(current_user: dict = Depends(get_current_user)):
                 "college_id": doc["college_id"],
                 "college_name": college_name,
                 "uploaded_by": doc["uploaded_by"],
-                "uploader_email": uploader_email,
+                # Frontend expects this key; we return uploader name for display
+                "uploader_email": uploader_name,
                 "uploaded_at": doc["created_at"]
             })
         
@@ -1058,6 +1062,289 @@ async def get_scheduled_documents(current_user: dict = Depends(get_current_user)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to retrieve scheduled documents: {str(e)}")
+
+
+# Additional Super Admin APIs used by the Super Admin frontend
+@app.get("/superadmin/stats")
+async def get_superadmin_stats(current_user: dict = Depends(get_current_user)):
+    """Global stats for the Super Admin dashboard."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view superadmin stats")
+
+    try:
+        client = get_service_client()
+
+        # Total colleges
+        colleges_resp = client.table("colleges").select("id", count="exact").execute()
+        total_colleges = colleges_resp.count or len(colleges_resp.data or [])
+
+        # Total college admins
+        admins_resp = (
+            client.table("profiles")
+            .select("id", count="exact")
+            .eq("role", "college_admin")
+            .execute()
+        )
+        total_admins = admins_resp.count or len(admins_resp.data or [])
+
+        # Total documents
+        documents_resp = client.table("documents").select("id", count="exact").execute()
+        total_docs = documents_resp.count or len(documents_resp.data or [])
+
+        # Total user queries (messages from users)
+        messages_resp = (
+            client.table("messages")
+            .select("id", count="exact")
+            .eq("role", "user")
+            .execute()
+        )
+        total_queries = messages_resp.count or len(messages_resp.data or [])
+
+        return {
+            "colleges": total_colleges,
+            "totalAdmins": total_admins,
+            "totalDocs": total_docs,
+            "totalQueries": total_queries,
+            # For now this is a static value; could be derived from cluster status later
+            "activeNodes": 12,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve superadmin stats: {str(e)}")
+
+
+@app.get("/superadmin/colleges")
+async def get_superadmin_colleges(
+    search: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """List all colleges for the Super Admin panel."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view colleges")
+
+    try:
+        client = get_service_client()
+        query = client.table("colleges").select("id, name, domain, created_at")
+
+        if search:
+            # Case-insensitive search on college name
+            query = query.ilike("name", f"%{search}%")
+
+        colleges_resp = query.execute()
+        colleges = colleges_resp.data or []
+
+        # For each college, compute admin_count (number of college_admin profiles)
+        result = []
+        for college in colleges:
+            admin_count = 0
+            try:
+                admins_resp = (
+                    client.table("profiles")
+                    .select("id", count="exact")
+                    .eq("role", "college_admin")
+                    .eq("college_id", college["id"])
+                    .execute()
+                )
+                admin_count = admins_resp.count or len(admins_resp.data or [])
+            except Exception:
+                admin_count = 0
+
+            result.append(
+                {
+                    "id": college["id"],
+                    "name": college["name"],
+                    "domain": college.get("domain"),
+                    "admin_count": admin_count,
+                }
+            )
+
+        return {"colleges": result}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve colleges: {str(e)}")
+
+
+@app.get("/superadmin/admins")
+async def get_superadmin_admins(
+    search: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """List all college admins for the Super Admin panel."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view admins")
+
+    try:
+        client = get_service_client()
+
+        # Get all college admins
+        admins_resp = (
+            client.table("profiles")
+            .select("id, college_id, full_name, role, created_at")
+            .eq("role", "college_admin")
+            .execute()
+        )
+        admins = admins_resp.data or []
+
+        # Load college names for mapping
+        college_ids = {a["college_id"] for a in admins if a.get("college_id")}
+        college_map = {}
+        if college_ids:
+            colleges_resp = (
+                client.table("colleges")
+                .select("id, name")
+                .in_("id", list(college_ids))
+                .execute()
+            )
+            for c in colleges_resp.data or []:
+                college_map[c["id"]] = c["name"]
+
+        # Build response objects
+        admin_list = []
+        for a in admins:
+            name = a.get("full_name") or "Unnamed Admin"
+            college_id = a.get("college_id")
+            college_name = college_map.get(college_id, "Unassigned")
+
+            admin_item = {
+                "id": a["id"],
+                "name": name,
+                # Email is stored in auth.users; for now we return placeholder to avoid errors in UI
+                "email": "",
+                "college_id": college_id,
+                "college": college_name,
+                # Profiles table has no explicit status; treat all as active for now
+                "status": "active",
+                "joined": a.get("created_at"),
+            }
+            admin_list.append(admin_item)
+
+        # Optional in-memory search filtering across name, email and college
+        if search:
+            lowered = search.lower()
+            admin_list = [
+                a
+                for a in admin_list
+                if lowered in a["name"].lower()
+                or lowered in (a["email"] or "").lower()
+                or lowered in (a["college"] or "").lower()
+            ]
+
+        return {"admins": admin_list}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve admins: {str(e)}")
+
+
+@app.get("/superadmin/documents")
+async def get_superadmin_documents(
+    search: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Global document log grouped by college and uploader for Super Admin panel."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view documents")
+
+    try:
+        client = get_service_client()
+
+        docs_resp = (
+            client.table("documents")
+            .select("id, filename, file_type, file_size, college_id, uploaded_by, created_at")
+            .execute()
+        )
+        docs = docs_resp.data or []
+
+        if not docs:
+            return {"groups": []}
+
+        # Load related colleges and uploader profiles
+        college_ids = {d["college_id"] for d in docs if d.get("college_id")}
+        uploader_ids = {d["uploaded_by"] for d in docs if d.get("uploaded_by")}
+
+        college_map = {}
+        if college_ids:
+            colleges_resp = (
+                client.table("colleges")
+                .select("id, name")
+                .in_("id", list(college_ids))
+                .execute()
+            )
+            for c in colleges_resp.data or []:
+                college_map[c["id"]] = c["name"]
+
+        uploader_map = {}
+        if uploader_ids:
+            profiles_resp = (
+                client.table("profiles")
+                .select("id, full_name")
+                .in_("id", list(uploader_ids))
+                .execute()
+            )
+            for p in profiles_resp.data or []:
+                uploader_map[p["id"]] = p.get("full_name") or "Unknown Admin"
+
+        # Group by (college_id, uploaded_by)
+        groups_map = {}
+
+        for doc in docs:
+            college_id = doc.get("college_id")
+            uploader_id = doc.get("uploaded_by")
+            college_name = college_map.get(college_id, "Unknown College")
+            admin_name = uploader_map.get(uploader_id, "Unknown Admin")
+
+            key = (college_id, uploader_id)
+            if key not in groups_map:
+                groups_map[key] = {
+                    "college": college_name,
+                    "admin_name": admin_name,
+                    "total_documents": 0,
+                    "documents": [],
+                }
+
+            doc_item = {
+                "id": doc["id"],
+                "name": doc["filename"],
+                "uploaded_at": doc.get("created_at"),
+                "type": (doc.get("file_type") or "").upper(),
+                "size": f"{doc.get('file_size', 0)} bytes" if doc.get("file_size") is not None else "",
+            }
+            groups_map[key]["documents"].append(doc_item)
+            groups_map[key]["total_documents"] += 1
+
+        groups = list(groups_map.values())
+
+        # Optional search filtering across college, admin or document name
+        if search:
+            lowered = search.lower()
+            filtered_groups = []
+            for g in groups:
+                if lowered in g["college"].lower() or lowered in g["admin_name"].lower():
+                    filtered_groups.append(g)
+                    continue
+
+                # Check documents inside the group
+                docs_match = [
+                    d
+                    for d in g["documents"]
+                    if lowered in d["name"].lower()
+                ]
+                if docs_match:
+                    g_copy = g.copy()
+                    g_copy["documents"] = docs_match
+                    g_copy["total_documents"] = len(docs_match)
+                    filtered_groups.append(g_copy)
+
+            groups = filtered_groups
+
+        return {"groups": groups}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve documents: {str(e)}")
+
 
 # Notification Endpoints
 @app.get("/notifications")
