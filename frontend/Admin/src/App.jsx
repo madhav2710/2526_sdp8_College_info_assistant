@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { adminAPI } from './services/api';
 import {
   Upload,
   FileText,
@@ -7,9 +8,7 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  Trash2,
   Search,
-  MoreVertical,
   ChevronRight,
   BarChart3,
   ShieldCheck,
@@ -89,33 +88,20 @@ const App = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [notification, setNotification] = useState(null);
 
-  const API_BASE_URL = 'http://localhost:8000'; // Adjust as needed
-
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.role === 'college_admin') {
-          localStorage.setItem('admin_token', data.access_token);
-          localStorage.setItem('admin_college_id', data.college_id);
-          setIsAuthenticated(true);
-        } else {
-          setLoginError('Access denied. You must be a college admin.');
-        }
+      const data = await adminAPI.login(loginEmail, loginPassword);
+      if (data.role === 'college_admin') {
+        localStorage.setItem('admin_token', data.access_token);
+        localStorage.setItem('admin_college_id', data.college_id);
+        setIsAuthenticated(true);
       } else {
-        const errData = await response.json();
-        setLoginError(errData.detail || 'Login failed');
+        setLoginError('Access denied. You must be a college admin.');
       }
     } catch (error) {
-      setLoginError('Could not connect to server.');
+      setLoginError(error.message || 'Could not connect to server.');
     }
   };
 
@@ -129,22 +115,17 @@ const App = () => {
   const fetchDocuments = async () => {
     if (!isAuthenticated) return;
     try {
-      const response = await fetch(`${API_BASE_URL}/admin/documents`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setDocuments(data.map(doc => ({
-          id: doc.id,
-          name: doc.filename,
-          type: doc.file_type.includes('pdf') ? 'PDF' : 'Document',
-          size: 'Unknown', // Backend doesn't store size yet
-          status: doc.status.charAt(0).toUpperCase() + doc.status.slice(1),
-          date: doc.created_at ? doc.created_at.split('T')[0] : 'N/A'
-        })));
-      }
+      const data = await adminAPI.getDocuments();
+      // The API returns { documents: [...], statistics: {...}, ... }
+      const documentsList = data.documents || data;
+      setDocuments(documentsList.map(doc => ({
+        id: doc.id,
+        name: doc.filename,
+        type: doc.file_type && doc.file_type.includes('pdf') ? 'PDF' : (doc.file_type || 'Document').toUpperCase(),
+        size: doc.file_size ? `${(doc.file_size / 1024 / 1024).toFixed(2)} MB` : 'Unknown',
+        status: doc.status.charAt(0).toUpperCase() + doc.status.slice(1),
+        date: doc.created_at ? doc.created_at.split('T')[0] : 'N/A'
+      })));
     } catch (error) {
       console.error('Error fetching documents:', error);
     }
@@ -183,23 +164,9 @@ const App = () => {
     let successCount = 0;
 
     for (const file of files) {
-      const formData = new FormData();
-      formData.append('file', file);
-
       try {
-        const response = await fetch(`${API_BASE_URL}/admin/upload`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('admin_token')}`
-          },
-          body: formData
-        });
-
-        if (response.ok) {
-          successCount++;
-        } else {
-          console.error('Upload failed for', file.name);
-        }
+        await adminAPI.uploadDocument(file);
+        successCount++;
       } catch (error) {
         console.error('Error uploading file:', error);
       }
@@ -207,7 +174,7 @@ const App = () => {
 
     setIsUploading(false);
     if (successCount > 0) {
-      showNotification(`Successfully uploaded ${successCount} documents.`);
+      showNotification(`Successfully uploaded ${successCount} document(s). Awaiting super admin approval.`);
       fetchDocuments();
     } else {
       showNotification('Failed to upload documents.', 'error');
@@ -224,10 +191,7 @@ const App = () => {
     }, 3000);
   };
 
-  const deleteDocument = (id) => {
-    setDocuments((prev) => prev.filter((doc) => doc.id !== id));
-    showNotification('Document removed from records.', 'error');
-  };
+
 
   if (!isAuthenticated) {
     return (
@@ -593,15 +557,6 @@ const App = () => {
                                   <RefreshCw size={16} />
                                 </button>
                               )}
-                              <button
-                                onClick={() => deleteDocument(doc.id)}
-                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                              <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
-                                <MoreVertical size={16} />
-                              </button>
                             </div>
                           </td>
                         </tr>

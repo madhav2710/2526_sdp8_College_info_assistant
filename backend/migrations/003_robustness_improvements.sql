@@ -40,6 +40,10 @@ ON document_status_history(document_id, created_at DESC);
 -- Enable RLS for status history
 ALTER TABLE document_status_history ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "Super admins can view all status history" ON document_status_history;
+DROP POLICY IF EXISTS "College admins can view their college status history" ON document_status_history;
+
 -- Super admins can view all status history
 CREATE POLICY "Super admins can view all status history" 
 ON document_status_history FOR SELECT 

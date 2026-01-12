@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { userAPI } from '../services/api';
 import {
   PromptInput,
   PromptInputActions,
@@ -34,26 +35,11 @@ const ChatInterface = () => {
         setIsSending(true);
 
         try {
-            const response = await fetch("http://127.0.0.1:8000/chat/", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${user.token}`
-                },
-                body: JSON.stringify({
-                    conversation_id: conversationIdRef.current,
-                    user_id: user.userId,
-                    role: "user",
-                    content: trimmed,
-                }),
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Failed to send message: ${response.status} ${errorText}`);
-            }
-
-            const data = await response.json();
+            const data = await userAPI.sendMessage(
+                conversationIdRef.current,
+                user.userId,
+                trimmed
+            );
             
             // Handle new RAG response format
             const assistantMessage = {

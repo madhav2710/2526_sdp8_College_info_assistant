@@ -13,15 +13,28 @@
 ALTER TABLE documents 
 DROP CONSTRAINT IF EXISTS documents_status_check;
 
--- Add new columns to documents table
+-- Add new columns to documents table (without foreign keys first)
 ALTER TABLE documents 
 ADD COLUMN IF NOT EXISTS file_type TEXT,
 ADD COLUMN IF NOT EXISTS file_size BIGINT,
-ADD COLUMN IF NOT EXISTS uploaded_by UUID REFERENCES auth.users(id),
-ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS uploaded_by UUID,
+ADD COLUMN IF NOT EXISTS approved_by UUID,
 ADD COLUMN IF NOT EXISTS approval_comments TEXT,
 ADD COLUMN IF NOT EXISTS error_message TEXT,
 ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;
+
+-- Add foreign key constraints separately (for idempotency)
+ALTER TABLE documents 
+DROP CONSTRAINT IF EXISTS documents_uploaded_by_fkey,
+DROP CONSTRAINT IF EXISTS documents_approved_by_fkey;
+
+ALTER TABLE documents
+ADD CONSTRAINT documents_uploaded_by_fkey 
+FOREIGN KEY (uploaded_by) REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE documents
+ADD CONSTRAINT documents_approved_by_fkey 
+FOREIGN KEY (approved_by) REFERENCES auth.users(id) ON DELETE SET NULL;
 
 -- Update status enum to include new statuses
 ALTER TABLE documents 
@@ -146,9 +159,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(convers
 
 -- Update existing documents to have 'completed' status if they have embeddings
 -- This assumes documents with embeddings in document_chunks are already processed
+-- Use created_at as processed_at since we don't have a reliable updated_at timestamp
 UPDATE documents 
 SET status = 'completed', 
-    processed_at = updated_at
+    processed_at = created_at
 WHERE status = 'processing' 
 AND EXISTS (
     SELECT 1 FROM document_chunks 

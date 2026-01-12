@@ -255,10 +255,33 @@ async def upload_document(
             raise HTTPException(status_code=400, detail=error_msg)
         
         # Check for duplicate files (same hash + college_id)
+        # Only consider documents in active/valid states as duplicates
+        # Exclude rejected and failed documents to allow re-upload after deletion
         file_hash = calculate_file_hash(file_content)
-        existing_docs = client.table("documents").select("id").eq("college_id", target_college_id).eq("file_hash", file_hash).execute()
+        existing_docs = client.table("documents").select("id, storage_path, status").eq("college_id", target_college_id).eq("file_hash", file_hash).in_("status", ["pending_approval", "approved", "processing", "completed"]).execute()
+        
+        # Verify that the existing document's file still exists in storage
         if existing_docs.data:
-            raise HTTPException(status_code=400, detail="A file with identical content already exists. Please upload a different file.")
+            import httpx
+            from app.core.database import url as supabase_url, service_key
+            
+            # Check if any of the existing documents still have files in storage
+            for doc in existing_docs.data:
+                storage_path = doc.get("storage_path")
+                if storage_path:
+                    check_url = f"{supabase_url}/storage/v1/object/documents/{storage_path}"
+                    check_headers = {"Authorization": f"Bearer {service_key}"}
+                    try:
+                        async with httpx.AsyncClient() as http_client:
+                            check_response = await http_client.head(check_url, headers=check_headers, timeout=10.0)
+                            # If file exists in storage, it's a real duplicate
+                            if check_response.status_code == 200:
+                                raise HTTPException(status_code=400, detail="A file with identical content already exists. Please upload a different file.")
+                    except Exception:
+                        # If we can't check (network error, etc.), assume file doesn't exist and allow upload
+                        continue
+            # If we get here, all existing documents with this hash have been deleted from storage
+            # So we can proceed with the upload
         
         # Sanitize filename
         original_filename = file.filename or "document"
@@ -269,9 +292,9 @@ async def upload_document(
 
         # Upload to Supabase Storage using direct HTTP to ensure Service Key is used
         import httpx
-        from app.core.database import url as supabase_url, service_key
+        from app.core.database import url as SUPABASE_URL, service_key
         
-        storage_url = f"{supabase_url}/storage/v1/object/documents/{path}"
+        storage_url = f"{SUPABASE_URL}/storage/v1/object/documents/{path}"
         headers = {
             "Authorization": f"Bearer {service_key}",
             "Content-Type": file.content_type,
@@ -307,7 +330,7 @@ async def upload_document(
         }
 
         # Use direct HTTP for DB Insert to ensure Service Key is used
-        db_url = f"{supabase_url}/rest/v1/documents"
+        db_url = f"{SUPABASE_URL}/rest/v1/documents"
         db_headers = {
             "Authorization": f"Bearer {service_key}",
             "ApiKey": service_key,
@@ -328,7 +351,7 @@ async def upload_document(
             # Rollback: Delete file if uploaded but DB insert failed
             if file_id:
                 try:
-                    delete_url = f"{supabase_url}/storage/v1/object/documents/{file_id}"
+                    delete_url = f"{SUPABASE_URL}/storage/v1/object/documents/{file_id}"
                     async with httpx.AsyncClient() as http_client:
                         await http_client.delete(delete_url, headers=headers, timeout=10.0)
                 except Exception as cleanup_error:
@@ -393,8 +416,8 @@ async def upload_document(
         if file_id:
             try:
                 import httpx
-                from app.core.database import url as supabase_url, service_key
-                delete_url = f"{supabase_url}/storage/v1/object/documents/{file_id}"
+                from app.core.database import url as SUPABASE_URL, service_key
+                delete_url = f"{SUPABASE_URL}/storage/v1/object/documents/{file_id}"
                 headers = {"Authorization": f"Bearer {service_key}"}
                 async with httpx.AsyncClient() as http_client:
                     await http_client.delete(delete_url, headers=headers, timeout=10.0)
@@ -654,10 +677,10 @@ async def approve_document(
             update_data["status"] = "processing"  # Move directly to processing
         
         # Use direct HTTP for DB update to ensure Service Key is used
-        from app.core.database import url as supabase_url, service_key
+        from app.core.database import url as SUPABASE_URL, service_key
         import httpx
         
-        db_url = f"{supabase_url}/rest/v1/documents?id=eq.{request.document_id}"
+        db_url = f"{SUPABASE_URL}/rest/v1/documents?id=eq.{request.document_id}"
         db_headers = {
             "Authorization": f"Bearer {service_key}",
             "ApiKey": service_key,
@@ -680,7 +703,7 @@ async def approve_document(
             "comments": request.comments
         }
         
-        approval_url = f"{supabase_url}/rest/v1/document_approvals"
+        approval_url = f"{SUPABASE_URL}/rest/v1/document_approvals"
         async with httpx.AsyncClient() as http_client:
             r_approval = await http_client.post(approval_url, json=approval_data, headers=db_headers, timeout=10.0)
             if r_approval.status_code not in [200, 201]:
@@ -794,10 +817,10 @@ async def reject_document(
             print(f"Warning: Failed to log status change: {log_error}")
         
         # Use direct HTTP for DB update to ensure Service Key is used
-        from app.core.database import url as supabase_url, service_key
+        from app.core.database import url as SUPABASE_URL, service_key
         import httpx
         
-        db_url = f"{supabase_url}/rest/v1/documents?id=eq.{request.document_id}"
+        db_url = f"{SUPABASE_URL}/rest/v1/documents?id=eq.{request.document_id}"
         db_headers = {
             "Authorization": f"Bearer {service_key}",
             "ApiKey": service_key,
@@ -820,7 +843,7 @@ async def reject_document(
             "comments": request.reason
         }
         
-        approval_url = f"{supabase_url}/rest/v1/document_approvals"
+        approval_url = f"{SUPABASE_URL}/rest/v1/document_approvals"
         async with httpx.AsyncClient() as http_client:
             r_approval = await http_client.post(approval_url, json=approval_data, headers=db_headers, timeout=10.0)
             if r_approval.status_code not in [200, 201]:
@@ -896,10 +919,10 @@ async def schedule_document_processing(
             "updated_at": datetime.now(dt.UTC).isoformat()
         }
         
-        from app.core.database import url as supabase_url, service_key
+        from app.core.database import url as SUPABASE_URL, service_key
         import httpx
         
-        db_url = f"{supabase_url}/rest/v1/documents?id=eq.{request.document_id}"
+        db_url = f"{SUPABASE_URL}/rest/v1/documents?id=eq.{request.document_id}"
         db_headers = {
             "Authorization": f"Bearer {service_key}",
             "ApiKey": service_key,
@@ -967,10 +990,10 @@ async def trigger_processing(
             "updated_at": datetime.now(dt.UTC).isoformat()
         }
         
-        from app.core.database import url as supabase_url, service_key
+        from app.core.database import url as SUPABASE_URL, service_key
         import httpx
         
-        db_url = f"{supabase_url}/rest/v1/documents?id=eq.{request.document_id}"
+        db_url = f"{SUPABASE_URL}/rest/v1/documents?id=eq.{request.document_id}"
         db_headers = {
             "Authorization": f"Bearer {service_key}",
             "ApiKey": service_key,
