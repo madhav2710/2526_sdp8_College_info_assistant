@@ -4,6 +4,7 @@ from pydantic import BaseModel, EmailStr
 from uuid import UUID, uuid4
 from datetime import datetime
 import datetime as dt
+import time
 from typing import Optional
 from app.core.database import supabase, get_service_client
 from app.core.auth import get_current_user
@@ -11,9 +12,38 @@ from app.core.notifications import notification_manager
 from app.models.notification import NotificationFilters, NotificationType
 from app.core.workflow import validate_status_transition, log_status_change
 from app.core.basic_chat import generate_basic_response
+from app.core.config import validate_startup_configuration, get_system_config, ConfigurationError
 import os
 import hashlib
 import mimetypes
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize and validate configuration at startup
+try:
+    validate_startup_configuration()
+    system_config = get_system_config()
+    logger.info(f"Configuration validated successfully: {system_config.application.app_name} v{system_config.application.app_version}")
+    
+    # Set logging level from configuration
+    logging.getLogger().setLevel(system_config.application.log_level.value)
+    
+    if not system_config.ai.gemini_api_key:
+        logger.warning("GEMINI_API_KEY not configured - RAG functionality will be limited")
+    else:
+        logger.info("RAG system fully configured and ready")
+        
+except ConfigurationError as e:
+    logger.error(f"Configuration validation failed: {str(e)}")
+    logger.error("Application startup failed due to invalid configuration")
+    raise SystemExit(1)
+except Exception as e:
+    logger.error(f"Unexpected error during configuration validation: {str(e)}")
+    logger.error("Application startup failed")
+    raise SystemExit(1)
 
 app = FastAPI()
 
@@ -41,25 +71,25 @@ class ChatRequest(BaseModel):
     user_id: UUID
     title: str
 
-# File validation constants
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.txt'}
-ALLOWED_MIME_TYPES = {
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'text/plain'
-}
+# File validation will use configuration values
+def get_file_config():
+    """Get file configuration from system config"""
+    return get_system_config().file
 
 def validate_file(file: UploadFile, file_content: bytes) -> tuple[bool, Optional[str]]:
     """
-    Validate uploaded file.
+    Validate uploaded file using configuration settings.
     
     Returns:
         (is_valid, error_message)
     """
+    file_config = get_file_config()
+    max_file_size = file_config.max_file_size_mb * 1024 * 1024  # Convert MB to bytes
+    allowed_extensions = set(file_config.allowed_file_extensions)
+    
     # Check file size
-    if len(file_content) > MAX_FILE_SIZE:
-        return False, f"File exceeds {MAX_FILE_SIZE / (1024*1024):.0f}MB limit"
+    if len(file_content) > max_file_size:
+        return False, f"File exceeds {file_config.max_file_size_mb}MB limit"
     
     if len(file_content) == 0:
         return False, "File is empty"
@@ -68,12 +98,18 @@ def validate_file(file: UploadFile, file_content: bytes) -> tuple[bool, Optional
     file_ext = None
     if file.filename:
         file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in ALLOWED_EXTENSIONS:
-            return False, f"Only {', '.join(ALLOWED_EXTENSIONS)} files are allowed"
+        if file_ext not in allowed_extensions:
+            return False, f"Only {', '.join(allowed_extensions)} files are allowed"
     
-    # Check MIME type
-    if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
-        return False, f"Invalid file type. Allowed types: {', '.join(ALLOWED_MIME_TYPES)}"
+    # Check MIME type (basic validation)
+    allowed_mime_types = {
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain'
+    }
+    
+    if file.content_type and file.content_type not in allowed_mime_types:
+        return False, f"Invalid file type. Allowed types: {', '.join(allowed_mime_types)}"
     
     # Verify MIME type matches extension
     if file_ext and file.content_type:
@@ -118,6 +154,7 @@ class ScheduleProcessingRequest(BaseModel):
     document_id: UUID
     scheduled_at: datetime
 
+<<<<<<< Updated upstream
 class AdminCreateRequest(BaseModel):
     name: str
     email: EmailStr
@@ -147,6 +184,182 @@ class CollegeUpdateRequest(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     is_active: Optional[bool] = None
+=======
+async def _trigger_rag_processing_with_status_tracking(
+    document_id: str, 
+    filename: str, 
+    approved_by: str
+):
+    """
+    Enhanced RAG processing trigger with comprehensive status tracking and error handling.
+    
+    This function provides better integration between document approval and RAG processing,
+    including detailed logging, error handling, and status updates.
+    """
+    client = get_service_client()
+    
+    try:
+        logger.info(f"Starting RAG processing for document {document_id} ({filename})")
+        
+        # Update document status to indicate RAG processing has started
+        try:
+            client.table("documents").update({
+                "status": "processing",
+                "processing_started_at": datetime.now(dt.UTC).isoformat(),
+                "processing_metadata": {
+                    "triggered_by": "document_approval",
+                    "approved_by": approved_by,
+                    "processing_type": "immediate",
+                    "start_time": datetime.now(dt.UTC).isoformat()
+                }
+            }).eq("id", document_id).execute()
+            
+            logger.info(f"Document {document_id} status updated to processing")
+            
+        except Exception as status_error:
+            logger.error(f"Failed to update document status to processing: {str(status_error)}")
+            # Continue with processing even if status update fails
+        
+        # Import and trigger RAG processing
+        from app.core.rag import trigger_rag_processing
+        await trigger_rag_processing(document_id)
+        
+        logger.info(f"RAG processing completed successfully for document {document_id} ({filename})")
+        
+    except Exception as e:
+        logger.error(f"RAG processing failed for document {document_id} ({filename}): {str(e)}")
+        
+        # Update document status to failed with error details
+        try:
+            client.table("documents").update({
+                "status": "failed",
+                "error_message": f"RAG processing failed: {str(e)}",
+                "failed_at": datetime.now(dt.UTC).isoformat(),
+                "processing_metadata": {
+                    "triggered_by": "document_approval",
+                    "approved_by": approved_by,
+                    "processing_type": "immediate",
+                    "error": str(e),
+                    "failed_at": datetime.now(dt.UTC).isoformat()
+                }
+            }).eq("id", document_id).execute()
+            
+            logger.info(f"Document {document_id} status updated to failed")
+            
+        except Exception as status_error:
+            logger.error(f"Failed to update document status to failed: {str(status_error)}")
+        
+        # Create failure notification
+        try:
+            # Get document details for notification
+            doc_res = client.table("documents").select("uploaded_by").eq("id", document_id).execute()
+            if doc_res.data and doc_res.data[0]["uploaded_by"]:
+                await notification_manager.create_document_notification(
+                    recipient_ids=[UUID(doc_res.data[0]["uploaded_by"])],
+                    notification_type=NotificationType.DOCUMENT_FAILED,
+                    document_id=UUID(document_id),
+                    document_filename=filename,
+                    additional_metadata={
+                        "error_message": str(e),
+                        "processing_type": "immediate",
+                        "failed_at": datetime.now(dt.UTC).isoformat()
+                    }
+                )
+        except Exception as notification_error:
+            logger.warning(f"Failed to create processing failure notification: {str(notification_error)}")
+
+@app.post("/admin/trigger-rag-processing")
+async def trigger_manual_rag_processing(
+    document_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Manually trigger RAG processing for an approved document.
+    
+    This endpoint allows college admins to trigger RAG processing for documents
+    that are approved but not yet processed.
+    """
+    if current_user["role"] != "college_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to trigger RAG processing")
+    
+    target_college_id = current_user["college_id"]
+    if not target_college_id:
+        raise HTTPException(status_code=400, detail="User is not associated with a college")
+    
+    try:
+        client = get_service_client()
+        
+        # Verify document exists and belongs to the user's college
+        doc_query = client.table("documents").select("*").eq("id", str(document_id)).eq("college_id", target_college_id).execute()
+        
+        if not doc_query.data:
+            raise HTTPException(status_code=404, detail="Document not found or not accessible")
+        
+        document = doc_query.data[0]
+        current_status = document["status"]
+        filename = document["filename"]
+        
+        # Verify document is in a state that allows RAG processing
+        if current_status not in ["approved", "failed"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Document must be approved or failed to trigger RAG processing. Current status: {current_status}"
+            )
+        
+        # Update document status to processing
+        client.table("documents").update({
+            "status": "processing",
+            "processing_started_at": datetime.now(dt.UTC).isoformat(),
+            "processing_metadata": {
+                "triggered_by": "manual_trigger",
+                "triggered_by_user": current_user["user_id"],
+                "processing_type": "manual",
+                "start_time": datetime.now(dt.UTC).isoformat()
+            }
+        }).eq("id", str(document_id)).execute()
+        
+        # Log status change
+        try:
+            log_status_change(
+                client=client,
+                document_id=str(document_id),
+                old_status=current_status,
+                new_status="processing",
+                changed_by=current_user["user_id"],
+                comments="Manual RAG processing triggered"
+            )
+        except Exception as log_error:
+            logger.warning(f"Failed to log status change: {str(log_error)}")
+        
+        # Trigger RAG processing
+        background_tasks.add_task(
+            _trigger_rag_processing_with_status_tracking,
+            str(document_id),
+            filename,
+            current_user["user_id"]
+        )
+        
+        logger.info(f"Manual RAG processing triggered for document {document_id} ({filename}) by user {current_user['user_id']}")
+        
+        return {
+            "status": "success",
+            "message": f"RAG processing started for document '{filename}'",
+            "document": {
+                "id": str(document_id),
+                "filename": filename,
+                "status": "processing",
+                "triggered_by": current_user["user_id"],
+                "triggered_at": datetime.now(dt.UTC).isoformat()
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to trigger manual RAG processing for document {document_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger RAG processing: {str(e)}")
+>>>>>>> Stashed changes
 
 # Auth Endpoints
 @app.post("/auth/login")
@@ -184,81 +397,505 @@ async def login(request: LoginRequest):
         raise HTTPException(status_code=400, detail="Login failed due to a server error. Please try again.")
 
 @app.post("/chat/")
-async def create_chat(message: ChatMessage):
+async def create_chat(message: ChatMessage, current_user: dict = Depends(get_current_user)):
+    """
+    Enhanced chat endpoint with improved RAG integration, error handling, and logging.
+    
+    Requirements addressed:
+    - 5.3: Authentication enforcement
+    - 5.4: Enhanced error handling and response formatting
+    - 7.1: Proper logging for RAG operations
+    """
+    # Rate limiting: Track expensive RAG operations per user
+    user_id_str = str(message.user_id)
+    current_time = time.time()
+    
+    # Simple in-memory rate limiting (in production, use Redis or database)
+    if not hasattr(create_chat, 'rate_limit_cache'):
+        create_chat.rate_limit_cache = {}
+    
+    # Clean old entries (older than 1 minute)
+    create_chat.rate_limit_cache = {
+        uid: timestamps for uid, timestamps in create_chat.rate_limit_cache.items()
+        if any(t > current_time - 60 for t in timestamps)
+    }
+    
+    # Check rate limit (max 10 requests per minute per user)
+    user_requests = create_chat.rate_limit_cache.get(user_id_str, [])
+    recent_requests = [t for t in user_requests if t > current_time - 60]
+    
+    if len(recent_requests) >= 10:
+        logger.warning(f"Rate limit exceeded for user {user_id_str}")
+        raise HTTPException(
+            status_code=429, 
+            detail="Too many requests. Please wait before sending another message."
+        )
+    
+    # Update rate limit cache
+    recent_requests.append(current_time)
+    create_chat.rate_limit_cache[user_id_str] = recent_requests
+    
+    # Enhanced logging for chat operations
+    logger.info(f"Processing chat message from user {user_id_str} in conversation {message.conversation_id}")
+    
     try:
         client = get_service_client()
 
-        # 1. Get user's college_id
-        profile = client.table("profiles").select("college_id").eq("id", str(message.user_id)).execute()
-        if not profile.data:
-            raise HTTPException(status_code=404, detail="User profile not found")
-        
-        college_id = profile.data[0]["college_id"]
-        if not college_id:
-            raise HTTPException(status_code=400, detail="User is not associated with a college")
-
-        # 2. Ensure conversation exists
-        conv_check = client.table("conversations").select("id").eq("id", str(message.conversation_id)).execute()
-        
-        if not conv_check.data:
-            client.table("conversations").insert({
-                "id": str(message.conversation_id),
-                "user_id": str(message.user_id),
-                "college_id": college_id,
-                "title": message.content[:50] + "..."
-            }).execute()
-
-        # 3. Insert the user message into the 'messages' table
-        user_message_data = {
-            "conversation_id": str(message.conversation_id),
-            "role": "user",
-            "content": message.content
-        }
-        user_message_response = client.table("messages").insert(user_message_data).execute()
-
-        # 4. Generate response (using basic chat for prototype, RAG can be enabled later)
-        # Try RAG first, fallback to basic chat if RAG is not available
+        # 1. Enhanced authentication and authorization
+        # Verify user exists and get college_id with proper error handling
         try:
-            from app.core.rag import generate_rag_response
+            profile = client.table("profiles").select("college_id, role").eq("id", str(message.user_id)).execute()
+            if not profile.data:
+                logger.error(f"User profile not found for user_id: {message.user_id}")
+                raise HTTPException(status_code=404, detail="User profile not found")
+            
+            college_id = profile.data[0]["college_id"]
+            user_role = profile.data[0]["role"]
+            
+            if not college_id:
+                logger.error(f"User {message.user_id} is not associated with a college")
+                raise HTTPException(status_code=400, detail="User is not associated with a college")
+            
+            # Verify user has permission to access this conversation
+            if current_user["user_id"] != str(message.user_id):
+                logger.warning(f"User {current_user['user_id']} attempted to send message as user {message.user_id}")
+                raise HTTPException(status_code=403, detail="Not authorized to send messages for this user")
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error during user authentication: {str(e)}")
+            raise HTTPException(status_code=500, detail="Authentication error")
+
+        # 2. Enhanced conversation management
+        try:
+            conv_check = client.table("conversations").select("id, user_id, college_id").eq("id", str(message.conversation_id)).execute()
+            
+            if not conv_check.data:
+                # Create new conversation with enhanced metadata
+                conversation_data = {
+                    "id": str(message.conversation_id),
+                    "user_id": str(message.user_id),
+                    "college_id": college_id,
+                    "title": message.content[:50] + ("..." if len(message.content) > 50 else ""),
+                    "created_at": datetime.now(dt.UTC).isoformat()
+                }
+                client.table("conversations").insert(conversation_data).execute()
+                logger.info(f"Created new conversation {message.conversation_id} for user {message.user_id}")
+            else:
+                # Verify user owns this conversation
+                existing_conv = conv_check.data[0]
+                if existing_conv["user_id"] != str(message.user_id):
+                    logger.warning(f"User {message.user_id} attempted to access conversation {message.conversation_id} owned by {existing_conv['user_id']}")
+                    raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+                
+                if existing_conv["college_id"] != college_id:
+                    logger.warning(f"College ID mismatch for conversation {message.conversation_id}")
+                    raise HTTPException(status_code=403, detail="College access violation")
+                    
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error managing conversation {message.conversation_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail="Conversation management error")
+
+        # 3. Store user message with enhanced error handling
+        try:
+            user_message_data = {
+                "conversation_id": str(message.conversation_id),
+                "role": "user",
+                "content": message.content,
+                "created_at": datetime.now(dt.UTC).isoformat()
+            }
+            user_message_response = client.table("messages").insert(user_message_data).execute()
+            
+            if not user_message_response.data:
+                raise Exception("Failed to store user message")
+                
+            logger.debug(f"Stored user message in conversation {message.conversation_id}")
+            
+        except Exception as e:
+            logger.error(f"Error storing user message: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to store message")
+
+        # 4. Enhanced RAG response generation with comprehensive error handling
+        rag_result = None
+        response_metadata = {
+            "rag_used": False,
+            "fallback_used": False,
+            "processing_time": 0,
+            "error_details": None
+        }
+        
+        start_time = time.time()
+        
+        try:
+            logger.info(f"Attempting RAG response for query: '{message.content[:100]}...' (college: {college_id})")
+            
+            from app.core.rag import generate_rag_response, RAGError, EmbeddingServiceError, VectorStoreError
+            
+            # Retrieve conversation history for context maintenance (Requirement 4.5)
+            conversation_history = []
+            try:
+                # Get last 10 messages from this conversation for context
+                history_response = client.table("messages").select(
+                    "role, content, created_at"
+                ).eq("conversation_id", str(message.conversation_id)).order(
+                    "created_at", desc=False
+                ).limit(10).execute()
+                
+                if history_response.data:
+                    # Exclude the current user message (it's not stored yet)
+                    conversation_history = [
+                        {
+                            "role": msg["role"],
+                            "content": msg["content"],
+                            "created_at": msg["created_at"]
+                        }
+                        for msg in history_response.data
+                    ]
+                    logger.debug(f"Retrieved {len(conversation_history)} messages for conversation context")
+                    
+            except Exception as history_error:
+                logger.warning(f"Failed to retrieve conversation history: {str(history_error)}")
+                # Continue without history - not critical for basic functionality
+            
             rag_result = await generate_rag_response(
                 query=message.content,
-                college_id=college_id
+                college_id=college_id,
+                conversation_history=conversation_history
             )
+            
+            response_metadata["rag_used"] = True
+            response_metadata["processing_time"] = time.time() - start_time
+            
+            if rag_result.get("fallback_used", False):
+                response_metadata["fallback_used"] = True
+                logger.warning(f"RAG fallback used for query: {message.content[:50]}...")
+            else:
+                quality_score = rag_result.get("quality_score", 0.0)
+                logger.info(f"RAG response generated successfully using {rag_result.get('chunks_used', 0)} chunks from {len(rag_result.get('sources', []))} sources (quality: {quality_score:.2f})")
+                
+        except EmbeddingServiceError as e:
+            logger.error(f"Embedding service error for user {message.user_id}: {str(e)}")
+            response_metadata["error_details"] = f"AI service error: {str(e)}"
+            
+            # Fallback to basic chat for embedding service errors
+            try:
+                rag_result = await generate_basic_response(
+                    query=message.content,
+                    college_id=college_id
+                )
+                response_metadata["fallback_used"] = True
+                logger.info(f"Fallback to basic chat successful for user {message.user_id}")
+            except Exception as fallback_error:
+                logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
+                raise HTTPException(status_code=503, detail="AI services are temporarily unavailable")
+                
+        except VectorStoreError as e:
+            logger.error(f"Vector store error for user {message.user_id}: {str(e)}")
+            response_metadata["error_details"] = f"Document search error: {str(e)}"
+            
+            # Fallback to basic chat for vector store errors
+            try:
+                rag_result = await generate_basic_response(
+                    query=message.content,
+                    college_id=college_id
+                )
+                response_metadata["fallback_used"] = True
+                logger.info(f"Fallback to basic chat successful after vector store error")
+            except Exception as fallback_error:
+                logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
+                raise HTTPException(status_code=503, detail="Document search is temporarily unavailable")
+                
+        except RAGError as e:
+            logger.error(f"RAG system error for user {message.user_id}: {str(e)}")
+            response_metadata["error_details"] = f"RAG system error: {str(e)}"
+            
+            # Fallback to basic chat for general RAG errors
+            try:
+                rag_result = await generate_basic_response(
+                    query=message.content,
+                    college_id=college_id
+                )
+                response_metadata["fallback_used"] = True
+                logger.info(f"Fallback to basic chat successful after RAG error")
+            except Exception as fallback_error:
+                logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
+                raise HTTPException(status_code=503, detail="Chat service is temporarily unavailable")
+                
         except Exception as e:
-            # Fallback to basic chat if RAG fails
-            print(f"RAG not available, using basic chat: {str(e)}")
-            rag_result = await generate_basic_response(
-                query=message.content,
-                college_id=college_id
-            )
+            logger.error(f"Unexpected error during RAG processing for user {message.user_id}: {str(e)}")
+            response_metadata["error_details"] = f"Unexpected error: {str(e)}"
+            
+            # Final fallback to basic chat
+            try:
+                rag_result = await generate_basic_response(
+                    query=message.content,
+                    college_id=college_id
+                )
+                response_metadata["fallback_used"] = True
+                logger.info(f"Final fallback to basic chat successful")
+            except Exception as fallback_error:
+                logger.error(f"All fallback mechanisms failed: {str(fallback_error)}")
+                raise HTTPException(status_code=503, detail="All chat services are temporarily unavailable")
         
-        # 5. Store the assistant's response
-        assistant_message_data = {
-            "conversation_id": str(message.conversation_id),
-            "role": "assistant",
-            "content": rag_result["response"],
-            "sources": rag_result.get("sources", [])  # Store sources as JSONB
-        }
-        assistant_message_response = client.table("messages").insert(assistant_message_data).execute()
+        # Ensure we have a valid response
+        if not rag_result or not rag_result.get("response"):
+            logger.error(f"No valid response generated for user {message.user_id}")
+            raise HTTPException(status_code=500, detail="Failed to generate response")
 
-        # 6. Return response with sources
-        return {
-            "status": "Message sent",
+        # 5. Enhanced response storage with graceful handling of missing columns
+        try:
+            # Prepare enhanced metadata for storage with source details
+            sources_data = rag_result.get("sources", [])
+            source_details = rag_result.get("source_details", [])
+            chunks_used = rag_result.get("chunks_used", 0)
+            quality_score = rag_result.get("quality_score", 0.0)
+            conversation_context_used = rag_result.get("conversation_context_used", False)
+            
+            # Prepare basic message data that should always work
+            assistant_message_data = {
+                "conversation_id": str(message.conversation_id),
+                "role": "assistant",
+                "content": rag_result["response"],
+                "created_at": datetime.now(dt.UTC).isoformat()
+            }
+            
+            # Prepare enhanced metadata
+            enhanced_metadata = {
+                "rag_used": response_metadata["rag_used"],
+                "fallback_used": response_metadata["fallback_used"],
+                "chunks_used": chunks_used,
+                "processing_time": response_metadata["processing_time"],
+                "user_role": user_role,
+                "college_id": college_id,
+                "quality_score": quality_score,
+                "conversation_context_used": conversation_context_used,
+                "source_details": source_details  # Enhanced source information
+            }
+            
+            # Try to store with all enhanced fields, gracefully handle missing columns
+            attempts = [
+                # Attempt 1: Full enhanced message with sources and metadata
+                {**assistant_message_data, "sources": sources_data, "metadata": enhanced_metadata},
+                # Attempt 2: With sources but no metadata
+                {**assistant_message_data, "sources": sources_data},
+                # Attempt 3: With metadata but no sources
+                {**assistant_message_data, "metadata": enhanced_metadata},
+                # Attempt 4: Basic message only
+                assistant_message_data
+            ]
+            
+            assistant_message_response = None
+            last_error = None
+            
+            for i, attempt_data in enumerate(attempts):
+                try:
+                    assistant_message_response = client.table("messages").insert(attempt_data).execute()
+                    if assistant_message_response.data:
+                        if i > 0:
+                            logger.warning(f"Message stored using fallback attempt {i+1} (some columns may be missing from database)")
+                        break
+                except Exception as attempt_error:
+                    last_error = attempt_error
+                    if i < len(attempts) - 1:  # Not the last attempt
+                        error_msg = str(attempt_error).lower()
+                        if "column" in error_msg or "metadata" in error_msg or "sources" in error_msg:
+                            logger.debug(f"Attempt {i+1} failed due to missing column, trying next approach")
+                            continue
+                    # If it's not a column issue or it's the last attempt, don't continue
+                    break
+            
+            if not assistant_message_response or not assistant_message_response.data:
+                raise Exception(f"Failed to store assistant message after all attempts. Last error: {str(last_error)}")
+                
+            logger.info(f"Stored assistant response in conversation {message.conversation_id} (sources: {len(sources_data)}, chunks: {chunks_used}, quality: {quality_score:.2f})")
+            
+        except Exception as e:
+            logger.error(f"Error storing assistant message: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to store response")
+
+        # 6. Enhanced response formatting with comprehensive metadata
+        response_data = {
+            "status": "success",
+            "message": "Message processed successfully",
             "role": "assistant",
             "content": rag_result["response"],
-            "sources": rag_result.get("sources", []),
+            "sources": sources_data,
             "conversation_id": str(message.conversation_id),
-            "chunks_used": rag_result.get("chunks_used", 0)
+            "metadata": {
+                "chunks_used": chunks_used,
+                "rag_enabled": response_metadata["rag_used"],
+                "fallback_used": response_metadata["fallback_used"],
+                "processing_time_ms": round(response_metadata["processing_time"] * 1000, 2),
+                "response_type": "rag" if response_metadata["rag_used"] and not response_metadata["fallback_used"] else "fallback",
+                "college_id": college_id,
+                "timestamp": datetime.now(dt.UTC).isoformat(),
+                "quality_score": quality_score,
+                "conversation_context_used": conversation_context_used,
+                "source_details": source_details  # Enhanced source information with similarity scores
+            }
         }
+        
+        # Add error details to response if available (for debugging)
+        if response_metadata["error_details"] and logger.level <= logging.DEBUG:
+            response_data["debug"] = {
+                "error_details": response_metadata["error_details"]
+            }
+        
+        logger.info(f"Chat response completed for user {message.user_id}: {response_data['metadata']['response_type']} response with {chunks_used} chunks (quality: {quality_score:.2f})")
+        
+        return response_data
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Unexpected error processing chat message for user {message.user_id}: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error processing chat message: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": "Internal server error",
+                "message": "An unexpected error occurred while processing your message",
+                "timestamp": datetime.now(dt.UTC).isoformat()
+            }
+        )
+
+@app.get("/config/status")
+async def get_config_status(current_user: dict = Depends(get_current_user)):
+    """
+    Get configuration status and summary (admin only).
+    
+    Returns configuration validation status and non-sensitive configuration summary.
+    """
+    # Only allow super_admin to view configuration status
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to view configuration status")
+    
+    try:
+        from app.core.config import get_config_manager
+        
+        config_manager = get_config_manager()
+        summary = config_manager.get_config_summary()
+        
+        return {
+            "status": "success",
+            "configuration_status": summary["status"],
+            "validation_errors": summary.get("validation_errors", []),
+            "config_summary": summary.get("config", {}),
+            "timestamp": datetime.now(dt.UTC).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get configuration status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve configuration status")
+
+@app.post("/config/validate")
+async def validate_config(current_user: dict = Depends(get_current_user)):
+    """
+    Validate current configuration (admin only).
+    
+    Returns detailed validation results for troubleshooting.
+    """
+    # Only allow super_admin to validate configuration
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to validate configuration")
+    
+    try:
+        from app.core.config import get_config_manager
+        
+        config_manager = get_config_manager()
+        validation_errors = config_manager.validate_current_config()
+        
+        return {
+            "status": "success",
+            "is_valid": len(validation_errors) == 0,
+            "validation_errors": validation_errors,
+            "error_count": len(validation_errors),
+            "timestamp": datetime.now(dt.UTC).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to validate configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to validate configuration")
+
+@app.get("/system/health")
+async def get_system_health(current_user: dict = Depends(get_current_user)):
+    """
+    Get comprehensive system health status including RAG services.
+    
+    Returns detailed health information for monitoring and troubleshooting.
+    """
+    # Allow both super_admin and college_admin to view system health
+    if current_user["role"] not in ["super_admin", "college_admin"]:
+        raise HTTPException(status_code=403, detail="Not authorized to view system health")
+    
+    try:
+        from app.core.rag import get_rag_system_health
+        
+        health_status = await get_rag_system_health()
+        
+        return {
+            "status": "success",
+            "system_health": health_status,
+            "timestamp": datetime.now(dt.UTC).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get system health: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve system health")
+
+@app.post("/system/health/reset")
+async def reset_system_health(
+    service_name: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Reset health status for services (admin only).
+    
+    Useful for clearing circuit breaker states and resetting failure counters.
+    """
+    # Only allow super_admin to reset system health
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to reset system health")
+    
+    try:
+        from app.core.rag import reset_service_health
+        
+        result = await reset_service_health(service_name)
+        
+        return {
+            "status": "success",
+            "reset_result": result,
+            "timestamp": datetime.now(dt.UTC).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to reset system health: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to reset system health")
 
 @app.get("/chat/history/")
+async def get_chat_history(user_id: UUID):
+    try:
+        conv_response = supabase.table("conversations").select("*").eq("user_id", str(user_id)).order("created_at", desc=True).execute()
+        return conv_response.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        validation_errors = config_manager.validate_current_config()
+        
+        return {
+            "status": "success",
+            "is_valid": len(validation_errors) == 0,
+            "validation_errors": validation_errors,
+            "error_count": len(validation_errors),
+            "timestamp": datetime.now(dt.UTC).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to validate configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to validate configuration")
 async def get_chat_history(user_id: UUID):
     try:
         conv_response = supabase.table("conversations").select("*").eq("user_id", str(user_id)).order("created_at", desc=True).execute()
@@ -355,7 +992,7 @@ async def upload_document(
         }
         file_type_val = mime_to_type.get(file.content_type, "other")
 
-        # Insert metadata to DB with enhanced tracking
+        # Insert metadata to DB with enhanced tracking and RAG processing integration
         doc_data = {
             "college_id": target_college_id,
             "filename": original_filename,
@@ -366,7 +1003,14 @@ async def upload_document(
             "status": "pending_approval",  # Changed to require approval before processing
             "file_hash": file_hash,
             "validated_at": datetime.now(dt.UTC).isoformat(),
-            "process_schedule": "manual"  # Default to manual processing
+            "process_schedule": "immediate",  # Default to immediate processing after approval
+            "upload_metadata": {
+                "original_filename": original_filename,
+                "content_type": file.content_type,
+                "upload_timestamp": datetime.now(dt.UTC).isoformat(),
+                "uploaded_by": current_user["user_id"],
+                "rag_processing_enabled": True  # Flag to indicate RAG processing should be triggered
+            }
         }
 
         # Use direct HTTP for DB Insert to ensure Service Key is used
@@ -549,15 +1193,57 @@ async def get_documents(
         else:
             query = query.order("created_at", desc=True)
         
-        # Execute document query
+        # Execute document query with enhanced RAG processing information
         documents_response = query.execute()
         documents = documents_response.data
+        
+        # Enhance documents with RAG processing status and progress indicators
+        enhanced_documents = []
+        for doc in documents:
+            # Get chunk count for completed documents to show RAG readiness
+            chunk_count = 0
+            rag_ready = False
+            processing_progress = None
+            
+            if doc.get("status") == "completed":
+                try:
+                    # Get chunk count for this document
+                    chunk_query = client.table("document_chunks").select("id", count="exact").eq("document_id", doc["id"])
+                    chunk_response = chunk_query.execute()
+                    chunk_count = chunk_response.count if hasattr(chunk_response, 'count') else len(chunk_response.data or [])
+                    rag_ready = chunk_count > 0
+                except Exception as chunk_error:
+                    logger.warning(f"Failed to get chunk count for document {doc['id']}: {str(chunk_error)}")
+            
+            # Extract processing progress from metadata if available
+            processing_metadata = doc.get("processing_metadata", {})
+            if doc.get("status") == "processing" and processing_metadata:
+                processing_progress = {
+                    "started_at": processing_metadata.get("start_time"),
+                    "triggered_by": processing_metadata.get("triggered_by"),
+                    "processing_type": processing_metadata.get("processing_type"),
+                    "estimated_completion": None  # Could be calculated based on file size
+                }
+            
+            # Create enhanced document object
+            enhanced_doc = {
+                **doc,
+                "rag_status": {
+                    "is_rag_ready": rag_ready,
+                    "chunk_count": chunk_count,
+                    "processing_progress": processing_progress,
+                    "can_be_queried": rag_ready and doc.get("status") == "completed"
+                }
+            }
+            enhanced_documents.append(enhanced_doc)
+        
+        documents = enhanced_documents
         
         # Calculate real-time statistics from database
         stats_query = client.table("documents").select("status").eq("college_id", target_college_id)
         stats_response = stats_query.execute()
         
-        # Calculate statistics
+        # Calculate statistics with RAG processing metrics
         statistics = {
             "total": 0,
             "uploaded": 0,
@@ -566,7 +1252,9 @@ async def get_documents(
             "rejected": 0,
             "processing": 0,
             "completed": 0,
-            "failed": 0
+            "failed": 0,
+            "rag_ready": 0,  # Documents that are completed and have chunks
+            "processing_queue": 0  # Documents in processing state
         }
         
         for doc in stats_response.data:
@@ -574,6 +1262,22 @@ async def get_documents(
             statistics["total"] += 1
             if doc_status in statistics:
                 statistics[doc_status] += 1
+            
+            # Count processing queue
+            if doc_status == "processing":
+                statistics["processing_queue"] += 1
+        
+        # Get RAG-ready count (completed documents with chunks)
+        try:
+            rag_ready_query = client.rpc("get_vector_storage_stats", {"target_college_id": target_college_id})
+            rag_stats_response = rag_ready_query.execute()
+            if rag_stats_response.data:
+                rag_stats = rag_stats_response.data[0]
+                statistics["rag_ready"] = rag_stats.get("completed_documents", 0)
+        except Exception as rag_stats_error:
+            logger.warning(f"Failed to get RAG statistics: {str(rag_stats_error)}")
+            # Fallback: count completed documents as potentially RAG-ready
+            statistics["rag_ready"] = statistics["completed"]
         
         # Get college information for dynamic data
         college_query = client.table("colleges").select("name").eq("id", target_college_id)
@@ -763,10 +1467,20 @@ async def approve_document(
         except Exception as log_error:
             print(f"Warning: Failed to log status change: {log_error}")
         
-        # Trigger RAG processing only if immediate
+        # Enhanced RAG processing trigger with better error handling and status tracking
         if request.process_schedule == 'immediate':
             from app.core.rag import trigger_rag_processing
-            background_tasks.add_task(trigger_rag_processing, str(request.document_id))
+            
+            # Log RAG processing initiation
+            logger.info(f"Triggering immediate RAG processing for document {request.document_id} ({document['filename']})")
+            
+            # Add RAG processing task with enhanced error handling
+            background_tasks.add_task(
+                _trigger_rag_processing_with_status_tracking,
+                str(request.document_id),
+                document['filename'],
+                current_user["user_id"]
+            )
         
         # Create notification for college admin about document approval
         try:

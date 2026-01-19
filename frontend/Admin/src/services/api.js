@@ -69,6 +69,13 @@ export const adminAPI = {
     });
   },
 
+  triggerRagProcessing: async (documentId) => {
+    return apiRequest('/admin/trigger-rag-processing', {
+      method: 'POST',
+      body: JSON.stringify({ document_id: documentId }),
+    });
+  },
+
   // Query History
   getQueryHistory: async (limit = 10) => {
     return apiRequest(`/admin/query-history?limit=${limit}`);

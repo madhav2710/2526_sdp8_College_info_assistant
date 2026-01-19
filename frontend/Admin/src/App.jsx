@@ -49,29 +49,47 @@ const INITIAL_HISTORY = [
   }
 ];
 
-const StatusBadge = ({ status }) => {
+const StatusBadge = ({ status, ragStatus }) => {
   const styles = {
     Ingested: 'bg-green-100 text-green-700 border-green-200',
     Completed: 'bg-green-100 text-green-700 border-green-200',
+    'RAG Ready': 'bg-emerald-100 text-emerald-700 border-emerald-200',
     Pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+    'Pending Approval': 'bg-yellow-100 text-yellow-700 border-yellow-200',
     Processing: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
+    'RAG Processing': 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     Ingesting: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
-    Failed: 'bg-red-100 text-red-700 border-red-200'
+    Failed: 'bg-red-100 text-red-700 border-red-200',
+    Approved: 'bg-indigo-100 text-indigo-700 border-indigo-200'
   };
 
   const icons = {
     Ingested: <CheckCircle size={14} className="mr-1" />,
     Completed: <CheckCircle size={14} className="mr-1" />,
+    'RAG Ready': <CheckCircle size={14} className="mr-1" />,
     Pending: <Clock size={14} className="mr-1" />,
+    'Pending Approval': <Clock size={14} className="mr-1" />,
     Processing: <RefreshCw size={14} className="mr-1 animate-spin" />,
+    'RAG Processing': <RefreshCw size={14} className="mr-1 animate-spin" />,
     Ingesting: <RefreshCw size={14} className="mr-1 animate-spin" />,
-    Failed: <AlertCircle size={14} className="mr-1" />
+    Failed: <AlertCircle size={14} className="mr-1" />,
+    Approved: <CheckCircle size={14} className="mr-1" />
   };
 
+  // Determine display status based on document status and RAG readiness
+  let displayStatus = status;
+  if (status === 'Completed' && ragStatus?.is_rag_ready) {
+    displayStatus = 'RAG Ready';
+  } else if (status === 'Processing' && ragStatus?.processing_progress) {
+    displayStatus = 'RAG Processing';
+  } else if (status === 'pending_approval') {
+    displayStatus = 'Pending Approval';
+  }
+
   return (
-    <span className={`flex items-center w-fit px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[status]}`}>
-      {icons[status]}
-      {status}
+    <span className={`flex items-center w-fit px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[displayStatus] || styles[status]}`}>
+      {icons[displayStatus] || icons[status]}
+      {displayStatus}
     </span>
   );
 };
@@ -124,7 +142,14 @@ const App = () => {
         type: doc.file_type && doc.file_type.includes('pdf') ? 'PDF' : (doc.file_type || 'Document').toUpperCase(),
         size: doc.file_size ? `${(doc.file_size / 1024 / 1024).toFixed(2)} MB` : 'Unknown',
         status: doc.status.charAt(0).toUpperCase() + doc.status.slice(1),
-        date: doc.created_at ? doc.created_at.split('T')[0] : 'N/A'
+        date: doc.created_at ? doc.created_at.split('T')[0] : 'N/A',
+        ragStatus: doc.rag_status || {
+          is_rag_ready: false,
+          chunk_count: 0,
+          processing_progress: null,
+          can_be_queried: false
+        },
+        processingProgress: doc.rag_status?.processing_progress
       })));
     } catch (error) {
       console.error('Error fetching documents:', error);
@@ -140,13 +165,15 @@ const App = () => {
     }
   }, [isAuthenticated]);
 
-  // Stats calculation
+  // Stats calculation with RAG processing metrics
   const stats = useMemo(
     () => ({
       total: documents.length,
       ingested: documents.filter((d) => d.status === 'Completed' || d.status === 'Ingested').length,
-      pending: documents.filter((d) => d.status === 'Processing' || d.status === 'Pending').length,
-      failed: documents.filter((d) => d.status === 'Failed').length
+      ragReady: documents.filter((d) => d.ragStatus?.is_rag_ready).length,
+      pending: documents.filter((d) => d.status === 'Processing' || d.status === 'Pending' || d.status === 'Pending_approval').length,
+      failed: documents.filter((d) => d.status === 'Failed').length,
+      processing: documents.filter((d) => d.status === 'Processing').length
     }),
     [documents]
   );
@@ -178,6 +205,27 @@ const App = () => {
       fetchDocuments();
     } else {
       showNotification('Failed to upload documents.', 'error');
+    }
+  };
+
+  const triggerRagProcessing = async (id) => {
+    try {
+      setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Processing' } : doc)));
+      
+      await adminAPI.triggerRagProcessing(id);
+      showNotification('RAG processing started successfully.');
+      
+      // Refresh documents to get updated status
+      setTimeout(() => {
+        fetchDocuments();
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error triggering RAG processing:', error);
+      showNotification('Failed to start RAG processing.', 'error');
+      
+      // Revert status change on error
+      fetchDocuments();
     }
   };
 
@@ -355,11 +403,12 @@ const App = () => {
         {/* Dashboard Tab Content */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {[
                 { label: 'Total Docs', value: stats.total, color: 'bg-indigo-600', icon: FileText },
+                { label: 'RAG Ready', value: stats.ragReady, color: 'bg-emerald-600', icon: CheckCircle },
                 { label: 'Ingested', value: stats.ingested, color: 'bg-green-600', icon: CheckCircle },
-                { label: 'Pending', value: stats.pending, color: 'bg-yellow-600', icon: Clock },
+                { label: 'Processing', value: stats.processing, color: 'bg-blue-600', icon: RefreshCw },
                 { label: 'Failed', value: stats.failed, color: 'bg-red-600', icon: AlertCircle }
               ].map((item, i) => (
                 <div
@@ -391,7 +440,7 @@ const App = () => {
 
                 <div className="space-y-4">
                   {documents
-                    .filter((d) => d.status === 'Pending')
+                    .filter((d) => d.status === 'Pending' || d.status === 'Processing' || d.status === 'Approved')
                     .slice(0, 3)
                     .map((doc) => (
                       <div
@@ -405,22 +454,42 @@ const App = () => {
                           <div>
                             <p className="text-sm font-semibold truncate max-w-[150px]">{doc.name}</p>
                             <p className="text-xs text-slate-500">{doc.size}</p>
+                            {doc.status === 'Processing' && doc.processingProgress && (
+                              <p className="text-xs text-blue-600 mt-1">
+                                RAG Processing...
+                              </p>
+                            )}
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => triggerIngestion(doc.id)}
-                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
-                        >
-                          <RefreshCw size={12} />
-                          Ingest Now
-                        </button>
+                        {doc.status === 'Pending' ? (
+                          <button
+                            onClick={() => triggerIngestion(doc.id)}
+                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                          >
+                            <RefreshCw size={12} />
+                            Ingest Now
+                          </button>
+                        ) : doc.status === 'Approved' ? (
+                          <button
+                            onClick={() => triggerRagProcessing(doc.id)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
+                          >
+                            <RefreshCw size={12} />
+                            Start RAG
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-2 text-blue-600">
+                            <RefreshCw size={14} className="animate-spin" />
+                            <span className="text-xs font-medium">Processing</span>
+                          </div>
+                        )}
                       </div>
                     ))}
 
-                  {documents.filter((d) => d.status === 'Pending').length === 0 && (
+                  {documents.filter((d) => d.status === 'Pending' || d.status === 'Processing' || d.status === 'Approved').length === 0 && (
                     <div className="text-center py-8">
-                      <p className="text-slate-400 text-sm italic">No pending documents to ingest.</p>
+                      <p className="text-slate-400 text-sm italic">No documents pending processing.</p>
                     </div>
                   )}
                 </div>
@@ -519,6 +588,7 @@ const App = () => {
                       <th className="px-6 py-4">Type</th>
                       <th className="px-6 py-4">Size</th>
                       <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4">RAG Status</th>
                       <th className="px-6 py-4">Upload Date</th>
                       <th className="px-6 py-4 text-right">Action</th>
                     </tr>
@@ -543,7 +613,31 @@ const App = () => {
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500">{doc.size}</td>
                           <td className="px-6 py-4">
-                            <StatusBadge status={doc.status} />
+                            <StatusBadge status={doc.status} ragStatus={doc.ragStatus} />
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col gap-1">
+                              {doc.ragStatus?.is_rag_ready ? (
+                                <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                                  <CheckCircle size={12} />
+                                  Ready ({doc.ragStatus.chunk_count} chunks)
+                                </span>
+                              ) : doc.status === 'Processing' ? (
+                                <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                                  <RefreshCw size={12} className="animate-spin" />
+                                  Processing...
+                                </span>
+                              ) : doc.status === 'Completed' ? (
+                                <span className="text-xs text-yellow-600 font-medium flex items-center gap-1">
+                                  <Clock size={12} />
+                                  Indexing pending
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-400">
+                                  Not processed
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-xs text-slate-500">{doc.date}</td>
                           <td className="px-6 py-4 text-right">
@@ -556,6 +650,20 @@ const App = () => {
                                 >
                                   <RefreshCw size={16} />
                                 </button>
+                              )}
+                              {(doc.status === 'Approved' || doc.status === 'Failed') && (
+                                <button
+                                  onClick={() => triggerRagProcessing(doc.id)}
+                                  className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                  title="Start RAG Processing"
+                                >
+                                  <RefreshCw size={16} />
+                                </button>
+                              )}
+                              {doc.ragStatus?.is_rag_ready && (
+                                <div className="p-2 text-emerald-600" title="Ready for queries">
+                                  <CheckCircle size={16} />
+                                </div>
                               )}
                             </div>
                           </td>
