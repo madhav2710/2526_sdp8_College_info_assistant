@@ -1,0 +1,25 @@
+# Supabase Configuration
+SUPABASE_URL="https://cnntolvykasxhdneocmx.supabase.co"
+SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNubnRvbHZ5a2FzeGhkbmVvY214Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3ODgzODgsImV4cCI6MjA4MTM2NDM4OH0.jlnPDomDMN1WhYMPw6Gt-i8SAxPiLkv5A9gZnzP3ETk"
+SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNubnRvbHZ5a2FzeGhkbmVvY214Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTc4ODM4OCwiZXhwIjoyMDgxMzY0Mzg4fQ.0Dyf0ZOHlnmLCWLN69JnXSMhFCZ_qRnXFg4rEOYXS8Q"
+# JWT Configuration
+JWT_SECRET_KEY="your-super-secret-jwt-key-change-this-in-production"
+JWT_ALGORITHM="HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Application Configuration
+APP_NAME="College Platform API"
+APP_VERSION="1.0.0"
+DEBUG=true
+
+# Rate Limiting Configuration
+RATE_LIMIT_ENABLED=true
+DEFAULT_RATE_LIMIT_PER_MINUTE=60
+
+# File Upload Configuration
+MAX_FILE_SIZE_MB=50
+ALLOWED_FILE_EXTENSIONS=".pdf,.doc,.docx,.txt"
+
+# Embedding Configuration
+EMBEDDING_MODEL="all-MiniLM-L6-v2"
+EMBEDDING_DIMENSION=384

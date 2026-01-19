@@ -112,6 +112,36 @@ class ScheduleProcessingRequest(BaseModel):
     document_id: UUID
     scheduled_at: datetime
 
+class AdminCreateRequest(BaseModel):
+    name: str
+    email: EmailStr
+    college_id: str
+    password: str
+
+class AdminUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    college_id: Optional[str] = None
+
+class AdminStatusUpdateRequest(BaseModel):
+    status: str
+
+class CollegeCreateRequest(BaseModel):
+    name: str
+    code: str
+    domain: Optional[str] = None
+    description: Optional[str] = None
+    logo_url: Optional[str] = None
+    is_active: Optional[bool] = True
+
+class CollegeUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    domain: Optional[str] = None
+    description: Optional[str] = None
+    logo_url: Optional[str] = None
+    is_active: Optional[bool] = None
+
 # Auth Endpoints
 @app.post("/auth/login")
 async def login(request: LoginRequest):
@@ -1148,7 +1178,8 @@ async def get_superadmin_colleges(
 
     try:
         client = get_service_client()
-        query = client.table("colleges").select("id, name, domain, created_at")
+        # Include additional fields (code, description, logo_url, is_active)
+        query = client.table("colleges").select("id, name, code, domain, description, logo_url, is_active, created_at")
 
         if search:
             # Case-insensitive search on college name
@@ -1177,7 +1208,9 @@ async def get_superadmin_colleges(
                 {
                     "id": college["id"],
                     "name": college["name"],
+                    "code": college.get("code"),
                     "domain": college.get("domain"),
+                    "description": college.get("description"),
                     "admin_count": admin_count,
                 }
             )
@@ -1187,6 +1220,114 @@ async def get_superadmin_colleges(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to retrieve colleges: {str(e)}")
+
+
+@app.post("/superadmin/colleges")
+async def create_superadmin_college(
+    request: CollegeCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a new college."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to create colleges")
+
+    try:
+        client = get_service_client()
+        data = request.dict()
+
+        # Normalize optional string fields
+        for key in ["domain", "description", "logo_url"]:
+            if data.get(key) is not None:
+                data[key] = data[key].strip() or None
+
+        resp = client.table("colleges").insert(data).execute()
+        college = (resp.data or [None])[0]
+        if not college:
+            raise HTTPException(status_code=500, detail="Failed to create college")
+
+        return {
+            "id": college["id"],
+            "name": college["name"],
+            "code": college.get("code"),
+            "domain": college.get("domain"),
+            "description": college.get("description"),
+            "logo_url": college.get("logo_url"),
+            "is_active": college.get("is_active", True),
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        msg = str(e)
+        # Map common uniqueness violations to user-friendly 400 errors
+        if "colleges_name_key" in msg:
+            raise HTTPException(status_code=400, detail="A college with this name already exists")
+        if "colleges_code_key" in msg:
+            raise HTTPException(status_code=400, detail="A college with this code already exists")
+        if "colleges_domain_key" in msg:
+            raise HTTPException(status_code=400, detail="A college with this domain already exists")
+        raise HTTPException(status_code=500, detail=f"Failed to create college: {msg}")
+
+
+@app.put("/superadmin/colleges/{college_id}")
+async def update_superadmin_college(
+    college_id: str,
+    request: CollegeUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update an existing college."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to update colleges")
+
+    try:
+        client = get_service_client()
+        updates = {k: v for k, v in request.dict().items() if v is not None}
+
+        # Normalize optional string fields
+        for key in ["domain", "description", "logo_url"]:
+            if key in updates:
+                updates[key] = updates[key].strip() or None
+
+        if not updates:
+            return {"status": "no_changes"}
+
+        resp = client.table("colleges").update(updates).eq("id", college_id).execute()
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="College not found")
+
+        return {"status": "success"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        msg = str(e)
+        if "colleges_name_key" in msg:
+            raise HTTPException(status_code=400, detail="A college with this name already exists")
+        if "colleges_code_key" in msg:
+            raise HTTPException(status_code=400, detail="A college with this code already exists")
+        if "colleges_domain_key" in msg:
+            raise HTTPException(status_code=400, detail="A college with this domain already exists")
+        raise HTTPException(status_code=500, detail=f"Failed to update college: {msg}")
+
+
+@app.delete("/superadmin/colleges/{college_id}")
+async def delete_superadmin_college(
+    college_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a college. Related profiles/documents may block deletion via FKs."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to delete colleges")
+
+    try:
+        client = get_service_client()
+        resp = client.table("colleges").delete().eq("id", college_id).execute()
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="College not found")
+        return {"status": "success"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        msg = str(e)
+        raise HTTPException(status_code=500, detail=f"Failed to delete college: {msg}")
 
 
 @app.get("/superadmin/admins")
@@ -1259,6 +1400,196 @@ async def get_superadmin_admins(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to retrieve admins: {str(e)}")
+
+
+@app.post("/superadmin/admins")
+async def create_superadmin_admin(
+    request: AdminCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a new college admin user (auth user + profile)."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to create admins")
+
+    try:
+        client = get_service_client()
+
+        # Create auth user using service role
+        try:
+            auth_resp = client.auth.admin.create_user(
+                {
+                    "email": request.email,
+                    "password": request.password,
+                    "email_confirm": True,
+                }
+            )
+            # Extract user from response (handle different response formats)
+            user = getattr(auth_resp, "user", None) or getattr(auth_resp, "data", {}).get("user")
+            if not user:
+                raise HTTPException(status_code=500, detail="Failed to create auth user")
+            
+            # Get user ID from the created user
+            raw_user_id = getattr(user, "id", None)
+            if raw_user_id is None and isinstance(user, dict):
+                raw_user_id = user.get("id")
+            if raw_user_id is None:
+                raise HTTPException(status_code=500, detail="Auth user record is missing an id")
+            user_id = str(raw_user_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            msg = str(e)
+            duplicate_markers = [
+                "User already registered",
+                "email_already_in_use",
+                "A user with this email address has already been registered",
+            ]
+            # If this is a duplicate-email error, return a clear error
+            if any(marker in msg for marker in duplicate_markers):
+                raise HTTPException(status_code=400, detail="An account with this email already exists")
+            # For other errors, re-raise
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Failed to create auth user: {str(e)}")
+
+        # Create or update profile row for this auth user (for role/college mapping)
+        profile_data = {
+            "id": user_id,
+            "full_name": request.name,
+            "role": "college_admin",
+            "college_id": request.college_id,
+        }
+        client.table("profiles").upsert(profile_data).execute()
+
+        # Your Supabase schema has public.admins.user_id -> public.users.id (NOT auth.users.id).
+        # To satisfy that FK, ensure a row exists in public.users for this auth user id.
+        # This assumes your public.users table has at least: id (uuid) and email (text, nullable or present).
+        try:
+            client.table("users").upsert(
+                {"id": user_id, "email": request.email},
+                on_conflict="id",
+            ).execute()
+        except Exception:
+            # If the project doesn't have public.users (or columns differ), don't block admin creation
+            # via profiles; but admins table sync below may still fail if FK is strict.
+            pass
+
+        # Also ensure an entry exists in the public.admins table that matches
+        # your schema (user_id, college_id, is_super_admin, etc.). We use
+        # upsert on (user_id, college_id) so this is idempotent.
+        try:
+            admin_row = {
+                "user_id": user_id,
+                "college_id": request.college_id,
+                "is_super_admin": False,
+            }
+            client.table("admins").upsert(admin_row, on_conflict="user_id,college_id").execute()
+        except Exception as admin_err:
+            import traceback
+            traceback.print_exc()
+            # Most common: FK violation (public.users row missing) or duplicate (unique constraint)
+            raise HTTPException(status_code=400, detail=f"Failed to create admin record: {str(admin_err)}")
+
+        return {
+            "id": user_id,
+            "name": request.name,
+            "email": request.email,
+            "college_id": request.college_id,
+            "status": "active",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to create admin: {str(e)}")
+
+
+@app.put("/superadmin/admins/{admin_id}")
+async def update_superadmin_admin(
+    admin_id: str,
+    request: AdminUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update an existing college admin's profile details."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to update admins")
+
+    try:
+        client = get_service_client()
+
+        updates = {}
+        if request.name is not None:
+            updates["full_name"] = request.name
+        if request.college_id is not None:
+            updates["college_id"] = request.college_id
+
+        if updates:
+            client.table("profiles").update(updates).eq("id", admin_id).execute()
+
+        # Note: Updating email in profiles doesn't change Supabase auth email; that
+        # can be added later if needed.
+
+        return {"status": "success"}
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to update admin: {str(e)}")
+
+
+@app.delete("/superadmin/admins/{admin_id}")
+async def delete_superadmin_admin(
+    admin_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a college admin (profile and auth user)."""
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to delete admins")
+
+    try:
+        client = get_service_client()
+
+        # Delete profile first
+        client.table("profiles").delete().eq("id", admin_id).execute()
+
+        # Best-effort delete of auth user; ignore failures here
+        try:
+            client.auth.admin.delete_user(admin_id)
+        except Exception:
+            pass
+
+        return {"status": "success"}
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to delete admin: {str(e)}")
+
+
+@app.patch("/superadmin/admins/{admin_id}/toggle-status")
+async def toggle_superadmin_admin_status(
+    admin_id: str,
+    request: AdminStatusUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Toggle admin status. For now this simply stores a status field in profiles
+    without enforcing any additional rules.
+    """
+    if current_user["role"] != "super_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to update admin status")
+
+    try:
+        client = get_service_client()
+        client.table("profiles").update({"status": request.status}).eq("id", admin_id).execute()
+        return {"status": "success"}
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to update admin status: {str(e)}")
 
 
 @app.get("/superadmin/documents")

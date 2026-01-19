@@ -63,7 +63,11 @@ const App = () => {
   });
   const [collegeFormData, setCollegeFormData] = useState({
     name: '',
-    domain: ''
+    code: '',
+    domain: '',
+    description: '',
+    logo_url: '',
+    is_active: true,
   });
 
   const showNotification = (msg, type = 'success') => {
@@ -258,10 +262,24 @@ const App = () => {
   const handleOpenCollegeModal = (college = null) => {
     if (college) {
       setEditingCollege(college);
-      setCollegeFormData({ name: college.name, domain: college.domain || '' });
+      setCollegeFormData({
+        name: college.name,
+        code: college.code || '',
+        domain: college.domain || '',
+        description: college.description || '',
+        logo_url: college.logo_url || '',
+        is_active: college.is_active !== false,
+      });
     } else {
       setEditingCollege(null);
-      setCollegeFormData({ name: '', domain: '' });
+      setCollegeFormData({
+        name: '',
+        code: '',
+        domain: '',
+        description: '',
+        logo_url: '',
+        is_active: true,
+      });
     }
     setIsCollegeModalOpen(true);
   };
@@ -270,11 +288,20 @@ const App = () => {
     e.preventDefault();
     setDataLoading(true);
     try {
+      const payload = {
+        name: collegeFormData.name,
+        code: collegeFormData.code,
+        domain: collegeFormData.domain || null,
+        description: collegeFormData.description || null,
+        logo_url: collegeFormData.logo_url || null,
+        is_active: collegeFormData.is_active,
+      };
+
       if (editingCollege) {
-        await superadminAPI.updateCollege(editingCollege.id, collegeFormData);
+        await superadminAPI.updateCollege(editingCollege.id, payload);
         showNotification("College updated successfully.");
       } else {
-        await superadminAPI.createCollege(collegeFormData);
+        await superadminAPI.createCollege(payload);
         showNotification("New college created successfully.");
       }
       setIsCollegeModalOpen(false);
@@ -890,6 +917,17 @@ const App = () => {
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">College Code</label>
+                  <input 
+                    required
+                    type="text" 
+                    placeholder="e.g. STXAV"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none"
+                    value={collegeFormData.code}
+                    onChange={(e) => setCollegeFormData({...collegeFormData, code: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Domain (Optional)</label>
                   <input 
                     type="text" 
@@ -898,6 +936,36 @@ const App = () => {
                     value={collegeFormData.domain}
                     onChange={(e) => setCollegeFormData({...collegeFormData, domain: e.target.value})}
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description (Optional)</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Short description of the institution"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none resize-none"
+                    value={collegeFormData.description}
+                    onChange={(e) => setCollegeFormData({...collegeFormData, description: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Logo URL (Optional)</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://..."
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none"
+                    value={collegeFormData.logo_url}
+                    onChange={(e) => setCollegeFormData({...collegeFormData, logo_url: e.target.value})}
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active</span>
+                  <button
+                    type="button"
+                    onClick={() => setCollegeFormData({...collegeFormData, is_active: !collegeFormData.is_active})}
+                    className={`flex items-center px-3 py-1 rounded-full text-xs font-medium border transition-all ${collegeFormData.is_active ? 'bg-green-50 border-green-200 text-green-700' : 'bg-slate-100 border-slate-300 text-slate-600'}`}
+                  >
+                    {collegeFormData.is_active ? 'Active' : 'Inactive'}
+                  </button>
                 </div>
                 <div className="pt-4 flex gap-3">
                   <button 

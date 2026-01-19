@@ -4,14 +4,22 @@ from dotenv import load_dotenv
 from pathlib import Path
 import httpx
 
-# Load environment variables from .env file in the backend directory
-env_path = Path(__file__).resolve().parent.parent.parent / '.env'
+# Load environment variables from env file in the backend directory.
+# Prefer `.env` but fall back to `_env` (your project currently uses `_env`).
+backend_root = Path(__file__).resolve().parent.parent.parent
+env_path = backend_root / '.env'
+if not env_path.exists():
+    alt_env_path = backend_root / '_env'
+    if alt_env_path.exists():
+        env_path = alt_env_path
+
 load_dotenv(dotenv_path=env_path)
 
 # Support both lowercase and uppercase env var names for Supabase
 url: str = os.getenv("supabase_url") or os.getenv("SUPABASE_URL")
 key: str = os.getenv("supabase_key") or os.getenv("SUPABASE_KEY")
-service_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+# Try common env var names for the service role key
+service_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SERVICE_ROLE_KEY")
 
 if not url or not key:
     raise ValueError("Supabase credentials not found in environment. Expected SUPABASE_URL/SUPABASE_KEY or supabase_url/supabase_key.")
