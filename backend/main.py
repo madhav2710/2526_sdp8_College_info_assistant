@@ -81,16 +81,22 @@ def validate_file(file: UploadFile, file_content: bytes) -> tuple[bool, Optional
         if expected_mime and expected_mime != file.content_type:
             return False, "File type mismatch. Please ensure the file extension matches the file content."
     
-    # Try to read file to check for corruption (basic check)
-    try:
-        if file_ext == '.pdf':
+    # Try to read file to check for corruption (basic check).
+    # If optional PDF dependency (pypdf) is missing, skip deep PDF validation
+    # instead of failing the upload.
+    if file_ext == '.pdf':
+        try:
             from io import BytesIO
             from pypdf import PdfReader
+
             reader = PdfReader(BytesIO(file_content))
             if len(reader.pages) == 0:
                 return False, "PDF file appears to be corrupted or empty"
-    except Exception as e:
-        return False, f"File validation failed: {str(e)}"
+        except ModuleNotFoundError:
+            # pypdf not installed: skip advanced PDF validation
+            pass
+        except Exception as e:
+            return False, f"File validation failed: {str(e)}"
     
     return True, None
 
@@ -168,10 +174,14 @@ async def login(request: LoginRequest):
             "role": profile["role"],
             "college_id": profile["college_id"]
         }
+    except HTTPException:
+        # Preserve explicit HTTPExceptions (e.g. 404 profile not found)
+        raise
     except Exception as e:
         if "Invalid login credentials" in str(e):
             raise HTTPException(status_code=401, detail="Invalid login credentials")
-        raise HTTPException(status_code=400, detail=str(e))
+        # For all other unexpected errors, surface a generic message
+        raise HTTPException(status_code=400, detail="Login failed due to a server error. Please try again.")
 
 @app.post("/chat/")
 async def create_chat(message: ChatMessage):
