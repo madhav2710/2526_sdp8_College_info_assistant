@@ -154,7 +154,7 @@ class ScheduleProcessingRequest(BaseModel):
     document_id: UUID
     scheduled_at: datetime
 
-<<<<<<< Updated upstream
+# <<<<<<< Updated upstream
 class AdminCreateRequest(BaseModel):
     name: str
     email: EmailStr
@@ -184,7 +184,7 @@ class CollegeUpdateRequest(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     is_active: Optional[bool] = None
-=======
+# =======
 async def _trigger_rag_processing_with_status_tracking(
     document_id: str, 
     filename: str, 
@@ -359,7 +359,7 @@ async def trigger_manual_rag_processing(
     except Exception as e:
         logger.error(f"Failed to trigger manual RAG processing for document {document_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to trigger RAG processing: {str(e)}")
->>>>>>> Stashed changes
+# >>>>>>> Stashed changes
 
 
 class GuestChatRequest(BaseModel):
