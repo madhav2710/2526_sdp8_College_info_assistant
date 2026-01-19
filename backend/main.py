@@ -361,7 +361,134 @@ async def trigger_manual_rag_processing(
         raise HTTPException(status_code=500, detail=f"Failed to trigger RAG processing: {str(e)}")
 >>>>>>> Stashed changes
 
+
+class GuestChatRequest(BaseModel):
+    content: str
+
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None
+    college_id: Optional[str] = None
+
+
+class SetCollegeRequest(BaseModel):
+    college_id: str
+
+
 # Auth Endpoints
+@app.post("/auth/signup")
+async def signup(request: SignupRequest):
+    """
+    Sign up a new end-user (student role by default).
+    This creates:
+      - An auth user in Supabase
+      - A profile row in public.profiles
+    The client should then call /auth/login to obtain a session token.
+    """
+    try:
+        client = get_service_client()
+
+        # Create auth user using service role so email is auto-confirmed
+        try:
+            auth_resp = client.auth.admin.create_user(
+                {
+                    "email": request.email,
+                    "password": request.password,
+                    "email_confirm": True,
+                }
+            )
+        except Exception as e:
+            msg = str(e)
+            if "User already registered" in msg or "email_already_in_use" in msg:
+                raise HTTPException(status_code=400, detail="An account with this email already exists")
+            raise
+
+        user = getattr(auth_resp, "user", None) or getattr(auth_resp, "data", {}).get("user")
+        if not user:
+            raise HTTPException(status_code=500, detail="Failed to create auth user")
+
+        raw_user_id = getattr(user, "id", None)
+        if raw_user_id is None and isinstance(user, dict):
+            raw_user_id = user.get("id")
+        if raw_user_id is None:
+            raise HTTPException(status_code=500, detail="Auth user record is missing an id")
+        user_id = str(raw_user_id)
+
+        # Optionally validate and attach college_id if provided
+        college_id = None
+        if request.college_id:
+            college_check = (
+                client.table("colleges")
+                .select("id")
+                .eq("id", request.college_id)
+                .limit(1)
+                .execute()
+            )
+            if not (college_check.data or []):
+                raise HTTPException(status_code=400, detail="Invalid college selected")
+            college_id = request.college_id
+
+        # Create profile with default student role
+        profile_data = {
+            "id": user_id,
+            "full_name": request.full_name,
+            "role": "student",
+            "college_id": college_id,
+        }
+        client.table("profiles").insert(profile_data).execute()
+
+        return {"message": "Signup successful. Please log in to continue."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
+
+
+@app.get("/public/colleges")
+async def list_public_colleges():
+    """Public list of colleges for end-user selection."""
+    try:
+        client = get_service_client()
+        resp = client.table("colleges").select("id, name, domain, code").order("name").execute()
+        return {"colleges": resp.data or []}
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to load colleges: {str(e)}")
+
+
+@app.post("/user/set-college")
+async def set_user_college(
+    request: SetCollegeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Attach the logged-in user to a college (sets profiles.college_id)."""
+    try:
+        client = get_service_client()
+        user_id = current_user["user_id"]
+
+        # Validate college exists
+        college_check = client.table("colleges").select("id").eq("id", request.college_id).limit(1).execute()
+        if not (college_check.data or []):
+            raise HTTPException(status_code=400, detail="Invalid college selected")
+
+        client.table("profiles").update({"college_id": request.college_id}).eq("id", user_id).execute()
+        return {"status": "success", "college_id": request.college_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to set college: {str(e)}")
+
+
 @app.post("/auth/login")
 async def login(request: LoginRequest):
     try:
@@ -875,6 +1002,44 @@ async def reset_system_health(
     except Exception as e:
         logger.error(f"Failed to reset system health: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to reset system health")
+
+
+@app.post("/guest-chat")
+async def guest_chat(request: GuestChatRequest):
+    """
+    Anonymous chat endpoint.
+    - Does NOT require authentication
+    - Does NOT store history per user
+    - Uses a default college (first available) for basic responses
+    """
+    try:
+        client = get_service_client()
+
+        # Pick the first available college as the default context
+        colleges_resp = client.table("colleges").select("id").limit(1).execute()
+        colleges = getattr(colleges_resp, "data", None) or colleges_resp.data
+        if not colleges:
+            return {
+                "content": "The system is not fully configured yet (no colleges found). Please contact the administrator.",
+                "sources": [],
+            }
+
+        college_id = colleges[0]["id"]
+
+        rag_result = await generate_basic_response(
+            query=request.content,
+            college_id=college_id,
+        )
+
+        return {
+            "content": rag_result.get("response", ""),
+            "sources": rag_result.get("sources", []),
+        }
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Guest chat failed: {str(e)}")
 
 @app.get("/chat/history/")
 async def get_chat_history(user_id: UUID):

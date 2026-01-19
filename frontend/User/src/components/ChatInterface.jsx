@@ -39,7 +39,8 @@ const ChatInterface = () => {
         try {
             const data = await userAPI.sendMessage(
                 conversationIdRef.current,
-                user.userId,
+                user?.userId,
+                user?.collegeId,
                 trimmed
             );
             

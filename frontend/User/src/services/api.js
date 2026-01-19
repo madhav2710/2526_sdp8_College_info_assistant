@@ -52,16 +52,45 @@ export const userAPI = {
     });
   },
 
-  // Chat
-  sendMessage: async (conversationId, userId, content) => {
-    return apiRequest('/chat/', {
+  signup: async (email, password, fullName, collegeId) => {
+    return apiRequest('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        user_id: userId,
-        role: 'user',
-        content: content,
-      }),
+      body: JSON.stringify({ email, password, full_name: fullName, college_id: collegeId || null }),
+    });
+  },
+
+  // College selection (for enabling history)
+  getColleges: async () => {
+    return apiRequest('/public/colleges');
+  },
+
+  setCollege: async (collegeId) => {
+    return apiRequest('/user/set-college', {
+      method: 'POST',
+      body: JSON.stringify({ college_id: collegeId }),
+    });
+  },
+
+  // Chat
+  sendMessage: async (conversationId, userId, collegeId, content) => {
+    // If the user is logged in AND has a college_id, send to the main chat endpoint (with history)
+    // Otherwise fall back to guest chat (no history) to avoid backend errors.
+    if (userId && collegeId) {
+      return apiRequest('/chat/', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          user_id: userId,
+          role: 'user',
+          content: content,
+        }),
+      });
+    }
+
+    // Otherwise, use the anonymous guest chat endpoint (no per-user history)
+    return apiRequest('/guest-chat', {
+      method: 'POST',
+      body: JSON.stringify({ content }),
     });
   },
 

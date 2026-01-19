@@ -7,6 +7,7 @@ import "./index.css"
 
 function AppContent() {
   const [showAdmin, setShowAdmin] = useState(false)
+  const [showAuthModal, setShowAuthModal] = useState(false)
   const { user, logout, loading } = useAuth()
 
   useEffect(() => {
@@ -19,11 +20,7 @@ function AppContent() {
     return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   }
 
-  if (!user) {
-    return <Login />
-  }
-
-  if (user.role === 'college_admin') {
+  if (user?.role === 'college_admin') {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 gap-6 p-4">
         <div className="text-center">
@@ -68,7 +65,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="fixed top-4 right-4 flex gap-2">
-        {user.role === 'super_admin' && (
+        {user?.role === 'super_admin' && (
           <button 
             onClick={() => setShowAdmin(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-xs hover:bg-blue-700 transition-colors"
@@ -76,20 +73,45 @@ function AppContent() {
             Go to Super Admin
           </button>
         )}
-        <button 
-          onClick={logout}
-          className="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg shadow-lg font-bold text-xs hover:bg-slate-300 transition-colors"
-        >
-          Logout
-        </button>
+        {user ? (
+          <button 
+            onClick={logout}
+            className="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg shadow-lg font-bold text-xs hover:bg-slate-300 transition-colors"
+          >
+            Logout
+          </button>
+        ) : (
+          <button 
+            onClick={() => setShowAuthModal(true)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-xs hover:bg-blue-700 transition-colors"
+          >
+            Login / Sign up
+          </button>
+        )}
       </div>
       <div className="mx-auto max-w-4xl">
         <div className="mb-8 flex items-center justify-between">
            <h1 className="text-3xl font-bold">College Information Chatbot</h1>
-           <span className="text-sm text-slate-500">Logged in as: {user.role}</span>
+           <span className="text-sm text-slate-500">
+             {user ? `Logged in as: ${user.role}` : 'Chatting as guest'}
+           </span>
         </div>
         <ChatInterface />
       </div>
+
+      {showAuthModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4">
+          <div className="relative w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <button
+              onClick={() => setShowAuthModal(false)}
+              className="absolute right-3 top-3 text-slate-400 hover:text-slate-700"
+            >
+              ✕
+            </button>
+            <Login onSuccess={() => setShowAuthModal(false)} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
