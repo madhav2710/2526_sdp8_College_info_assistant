@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { userAPI } from '../services/api';
-import { Button } from './ui/button';
+import { LogIn, UserPlus, Mail, Lock, User, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
 
 const Login = ({ onSuccess }) => {
     const [mode, setMode] = useState('login');
@@ -9,148 +8,186 @@ const Login = ({ onSuccess }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const [colleges, setColleges] = useState([]);
-    const [selectedCollegeId, setSelectedCollegeId] = useState('');
-    const [loadingColleges, setLoadingColleges] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const { login, signup } = useAuth();
-
-    useEffect(() => {
-        const fetchColleges = async () => {
-            try {
-                setLoadingColleges(true);
-                const resp = await userAPI.getColleges();
-                const list = resp.colleges || [];
-                setColleges(list);
-                if (list.length > 0) {
-                    setSelectedCollegeId(list[0].id);
-                }
-            } catch (e) {
-                setError(e.message || 'Failed to load colleges');
-            } finally {
-                setLoadingColleges(false);
-            }
-        };
-        if (mode === 'signup') {
-            fetchColleges();
-        }
-    }, [mode]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setSuccessMessage('');
+        setIsLoading(true);
+        
         try {
             if (mode === 'login') {
                 await login(email, password);
+                if (onSuccess) onSuccess();
             } else {
-                await signup(email, password, fullName, selectedCollegeId);
+                await signup(email, password, fullName, null);
+                setSuccessMessage('Account created! Please check your email to confirm your account before logging in.');
+                setFullName('');
+                setEmail('');
+                setPassword('');
+                setTimeout(() => {
+                    setMode('login');
+                    setSuccessMessage('');
+                }, 5000);
             }
-            // Close modal on success
-            if (onSuccess) onSuccess();
         } catch (err) {
             setError(err.message || 'Something went wrong, please try again.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
     return (
-        <div>
-            <h2 className="mb-2 text-center text-2xl font-bold text-slate-800">
-                {mode === 'login' ? 'CollegeInfo Login' : 'Create an Account'}
-            </h2>
-            <p className="mb-4 text-center text-sm text-slate-500">
-                {mode === 'login'
-                    ? 'Sign in to sync your chat history across devices.'
-                    : 'Sign up to save your conversations and access them later.'}
-            </p>
+        <div className="w-full">
+            {/* Header */}
+            <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mb-4 shadow-lg">
+                    {mode === 'login' ? (
+                        <LogIn className="w-8 h-8 text-white" />
+                    ) : (
+                        <UserPlus className="w-8 h-8 text-white" />
+                    )}
+                </div>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+                    {mode === 'login' ? 'Welcome Back' : 'Create Account'}
+                </h2>
+                <p className="text-sm text-slate-600">
+                    {mode === 'login'
+                        ? 'Sign in to sync your chat history across devices'
+                        : 'Sign up to save your conversations and access them later'}
+                </p>
+            </div>
+
+            {/* Error Message */}
             {error && (
-                <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-500">
-                    {error}
+                <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 animate-in fade-in">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{error}</span>
                 </div>
             )}
+
+            {/* Success Message */}
+            {successMessage && (
+                <div className="mb-4 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 animate-in fade-in">
+                    <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{successMessage}</span>
+                </div>
+            )}
+
+            {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
                 {mode === 'signup' && (
-                    <>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700">
-                                Full name (optional)
-                            </label>
-                            <input
-                                type="text"
-                                className="mt-1 w-full rounded-md border border-slate-300 p-2 focus:border-blue-500 focus:outline-none"
-                                value={fullName}
-                                onChange={(e) => setFullName(e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-700">
-                                Select your college
-                            </label>
-                            <select
-                                required
-                                className="mt-1 w-full rounded-md border border-slate-300 p-2 text-sm focus:border-blue-500 focus:outline-none"
-                                value={selectedCollegeId}
-                                onChange={(e) => setSelectedCollegeId(e.target.value)}
-                            >
-                                {loadingColleges && <option value="">Loading colleges...</option>}
-                                {!loadingColleges && colleges.length === 0 && (
-                                    <option value="">No colleges available</option>
-                                )}
-                                {colleges.map((c) => (
-                                    <option key={c.id} value={c.id}>
-                                        {c.name}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    </>
+                    <div className="space-y-2">
+                        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                            <User className="w-4 h-4 text-slate-500" />
+                            Full name (optional)
+                        </label>
+                        <input
+                            type="text"
+                            className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-slate-400"
+                            placeholder="John Doe"
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                        />
+                    </div>
                 )}
-                <div>
-                    <label className="block text-sm font-medium text-slate-700">Email</label>
+                
+                <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                        <Mail className="w-4 h-4 text-slate-500" />
+                        Email
+                    </label>
                     <input
                         type="email"
                         required
-                        className="mt-1 w-full rounded-md border border-slate-300 p-2 focus:border-blue-500 focus:outline-none"
+                        className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-slate-400"
+                        placeholder="you@example.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                     />
                 </div>
-                <div>
-                    <label className="block text-sm font-medium text-slate-700">Password</label>
+                
+                <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                        <Lock className="w-4 h-4 text-slate-500" />
+                        Password
+                    </label>
                     <input
                         type="password"
                         required
-                        className="mt-1 w-full rounded-md border border-slate-300 p-2 focus:border-blue-500 focus:outline-none"
+                        className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-slate-400"
+                        placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                     />
                 </div>
-                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">
-                    {mode === 'login' ? 'Sign In' : 'Sign Up'}
-                </Button>
+                
+                <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                >
+                    {isLoading ? (
+                        <>
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                            <span>Processing...</span>
+                        </>
+                    ) : (
+                        <>
+                            {mode === 'login' ? (
+                                <>
+                                    <LogIn className="w-4 h-4" />
+                                    <span>Sign In</span>
+                                </>
+                            ) : (
+                                <>
+                                    <UserPlus className="w-4 h-4" />
+                                    <span>Sign Up</span>
+                                </>
+                            )}
+                        </>
+                    )}
+                </button>
             </form>
-            <div className="mt-4 text-center text-sm text-slate-600">
-                {mode === 'login' ? (
-                    <>
-                        Don&apos;t have an account?{' '}
-                        <button
-                            type="button"
-                            onClick={() => setMode('signup')}
-                            className="font-semibold text-blue-600 hover:underline"
-                        >
-                            Sign up
-                        </button>
-                    </>
-                ) : (
-                    <>
-                        Already have an account?{' '}
-                        <button
-                            type="button"
-                            onClick={() => setMode('login')}
-                            className="font-semibold text-blue-600 hover:underline"
-                        >
-                            Log in
-                        </button>
-                    </>
-                )}
+
+            {/* Toggle Mode */}
+            <div className="mt-6 pt-6 border-t border-slate-200 text-center">
+                <p className="text-sm text-slate-600">
+                    {mode === 'login' ? (
+                        <>
+                            Don&apos;t have an account?{' '}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setMode('signup');
+                                    setError('');
+                                    setSuccessMessage('');
+                                }}
+                                className="font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+                            >
+                                Sign up
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            Already have an account?{' '}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setMode('login');
+                                    setError('');
+                                    setSuccessMessage('');
+                                }}
+                                className="font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+                            >
+                                Log in
+                            </button>
+                        </>
+                    )}
+                </p>
             </div>
         </div>
     );

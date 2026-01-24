@@ -98,6 +98,10 @@ export const userAPI = {
     return apiRequest(`/chat/history/?user_id=${userId}`);
   },
 
+  getConversationMessages: async (conversationId) => {
+    return apiRequest(`/chat/conversation/${conversationId}/messages`);
+  },
+
   // Notifications
   getNotifications: async (params = {}) => {
     const queryParams = new URLSearchParams();
@@ -124,5 +128,10 @@ export const userAPI = {
 
   getUnreadCount: async () => {
     return apiRequest('/notifications/unread-count');
+  },
+
+  // Profile
+  getProfile: async () => {
+    return apiRequest('/user/profile');
   },
 };

@@ -383,38 +383,55 @@ async def signup(request: SignupRequest):
     """
     Sign up a new end-user (student role by default).
     This creates:
-      - An auth user in Supabase
-      - A profile row in public.profiles
-    The client should then call /auth/login to obtain a session token.
+      - An auth user in Supabase (via regular client to trigger confirmation email)
+      - A profile row in public.profiles (via admin client)
+      - Sends a confirmation email to the user automatically
+    
+    The user must confirm their email before they can log in.
     """
     try:
-        client = get_service_client()
-
-        # Create auth user using service role so email is auto-confirmed
+        from app.core.database import supabase
+        
+        # Use regular client (not admin) to sign up - this automatically sends confirmation email
         try:
-            auth_resp = client.auth.admin.create_user(
+            auth_resp = supabase.auth.sign_up(
                 {
                     "email": request.email,
                     "password": request.password,
-                    "email_confirm": True,
                 }
             )
         except Exception as e:
             msg = str(e)
-            if "User already registered" in msg or "email_already_in_use" in msg:
+            if "User already registered" in msg or "email_already_in_use" in msg or "already registered" in msg.lower():
                 raise HTTPException(status_code=400, detail="An account with this email already exists")
             raise
 
-        user = getattr(auth_resp, "user", None) or getattr(auth_resp, "data", {}).get("user")
+        # Extract user from response
+        user = None
+        if hasattr(auth_resp, "user") and auth_resp.user:
+            user = auth_resp.user
+        elif hasattr(auth_resp, "data") and auth_resp.data:
+            if isinstance(auth_resp.data, dict):
+                user = auth_resp.data.get("user")
+            else:
+                user = getattr(auth_resp.data, "user", None)
+        
         if not user:
             raise HTTPException(status_code=500, detail="Failed to create auth user")
 
-        raw_user_id = getattr(user, "id", None)
-        if raw_user_id is None and isinstance(user, dict):
+        # Get user ID
+        raw_user_id = None
+        if hasattr(user, "id"):
+            raw_user_id = user.id
+        elif isinstance(user, dict):
             raw_user_id = user.get("id")
+        
         if raw_user_id is None:
             raise HTTPException(status_code=500, detail="Auth user record is missing an id")
         user_id = str(raw_user_id)
+
+        # Now use admin client to create the profile (since we need service role for table operations)
+        client = get_service_client()
 
         # Optionally validate and attach college_id if provided
         college_id = None
@@ -439,7 +456,10 @@ async def signup(request: SignupRequest):
         }
         client.table("profiles").insert(profile_data).execute()
 
-        return {"message": "Signup successful. Please log in to continue."}
+        return {
+            "message": "Signup successful! Please check your email to confirm your account before logging in.",
+            "email_sent": True
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -461,6 +481,61 @@ async def list_public_colleges():
 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to load colleges: {str(e)}")
+
+
+@app.get("/user/profile")
+async def get_user_profile(current_user: dict = Depends(get_current_user)):
+    """Get the current user's full profile information."""
+    try:
+        client = get_service_client()
+        user_id = current_user["user_id"]
+        
+        # Get user email from auth using admin API
+        user_email = None
+        try:
+            auth_user = client.auth.admin.get_user_by_id(user_id)
+            if hasattr(auth_user, "user") and auth_user.user:
+                user_email = auth_user.user.email
+            elif isinstance(auth_user, dict) and "user" in auth_user:
+                user_email = auth_user["user"].get("email")
+            elif hasattr(auth_user, "data"):
+                user_data = auth_user.data
+                if isinstance(user_data, dict) and "user" in user_data:
+                    user_email = user_data["user"].get("email")
+                elif hasattr(user_data, "email"):
+                    user_email = user_data.email
+        except Exception as e:
+            logger.warning(f"Could not fetch user email: {str(e)}")
+        
+        # Fetch profile with college name
+        profile_query = client.table("profiles").select("full_name, role, college_id").eq("id", user_id).execute()
+        
+        if not profile_query.data:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        
+        profile = profile_query.data[0]
+        college_name = None
+        
+        # Fetch college name if college_id exists
+        if profile.get("college_id"):
+            college_query = client.table("colleges").select("name").eq("id", profile["college_id"]).execute()
+            if college_query.data:
+                college_name = college_query.data[0]["name"]
+        
+        return {
+            "user_id": user_id,
+            "email": user_email,
+            "full_name": profile.get("full_name"),
+            "role": profile["role"],
+            "college_id": profile.get("college_id"),
+            "college_name": college_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch user profile: {str(e)}")
 
 
 @app.post("/user/set-college")
@@ -498,9 +573,10 @@ async def login(request: LoginRequest):
             "password": request.password
         })
         
-        # Fetch user profile for role and college_id
+        # Fetch user profile with full details
         user_id = auth_response.user.id
-        profile_response = supabase.table("profiles").select("role, college_id").eq("id", user_id).execute()
+        user_email = auth_response.user.email
+        profile_response = supabase.table("profiles").select("role, college_id, full_name").eq("id", user_id).execute()
         
         if not profile_response.data:
             raise HTTPException(status_code=404, detail="User profile not found")
@@ -511,6 +587,8 @@ async def login(request: LoginRequest):
             "access_token": auth_response.session.access_token,
             "token_type": "bearer",
             "user_id": user_id,
+            "email": user_email,
+            "full_name": profile.get("full_name"),
             "role": profile["role"],
             "college_id": profile["college_id"]
         }
@@ -656,10 +734,22 @@ async def create_chat(message: ChatMessage, current_user: dict = Depends(get_cur
         
         start_time = time.time()
         
+        # Import RAG modules - handle import errors gracefully
         try:
-            logger.info(f"Attempting RAG response for query: '{message.content[:100]}...' (college: {college_id})")
-            
             from app.core.rag import generate_rag_response, RAGError, EmbeddingServiceError, VectorStoreError
+            rag_available = True
+        except (ImportError, ModuleNotFoundError) as import_error:
+            logger.warning(f"RAG module not available: {str(import_error)}")
+            rag_available = False
+            EmbeddingServiceError = None
+            VectorStoreError = None
+            RAGError = None
+        
+        try:
+            if not rag_available:
+                raise ImportError("RAG module dependencies not installed")
+                
+            logger.info(f"Attempting RAG response for query: '{message.content[:100]}...' (college: {college_id})")
             
             # Retrieve conversation history for context maintenance (Requirement 4.5)
             conversation_history = []
@@ -703,69 +793,78 @@ async def create_chat(message: ChatMessage, current_user: dict = Depends(get_cur
                 quality_score = rag_result.get("quality_score", 0.0)
                 logger.info(f"RAG response generated successfully using {rag_result.get('chunks_used', 0)} chunks from {len(rag_result.get('sources', []))} sources (quality: {quality_score:.2f})")
                 
-        except EmbeddingServiceError as e:
-            logger.error(f"Embedding service error for user {message.user_id}: {str(e)}")
-            response_metadata["error_details"] = f"AI service error: {str(e)}"
-            
-            # Fallback to basic chat for embedding service errors
-            try:
-                rag_result = await generate_basic_response(
-                    query=message.content,
-                    college_id=college_id
-                )
-                response_metadata["fallback_used"] = True
-                logger.info(f"Fallback to basic chat successful for user {message.user_id}")
-            except Exception as fallback_error:
-                logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
-                raise HTTPException(status_code=503, detail="AI services are temporarily unavailable")
-                
-        except VectorStoreError as e:
-            logger.error(f"Vector store error for user {message.user_id}: {str(e)}")
-            response_metadata["error_details"] = f"Document search error: {str(e)}"
-            
-            # Fallback to basic chat for vector store errors
-            try:
-                rag_result = await generate_basic_response(
-                    query=message.content,
-                    college_id=college_id
-                )
-                response_metadata["fallback_used"] = True
-                logger.info(f"Fallback to basic chat successful after vector store error")
-            except Exception as fallback_error:
-                logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
-                raise HTTPException(status_code=503, detail="Document search is temporarily unavailable")
-                
-        except RAGError as e:
-            logger.error(f"RAG system error for user {message.user_id}: {str(e)}")
-            response_metadata["error_details"] = f"RAG system error: {str(e)}"
-            
-            # Fallback to basic chat for general RAG errors
-            try:
-                rag_result = await generate_basic_response(
-                    query=message.content,
-                    college_id=college_id
-                )
-                response_metadata["fallback_used"] = True
-                logger.info(f"Fallback to basic chat successful after RAG error")
-            except Exception as fallback_error:
-                logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
-                raise HTTPException(status_code=503, detail="Chat service is temporarily unavailable")
+        except (ImportError, ModuleNotFoundError) as import_error:
+            logger.warning(f"RAG not available, using basic chat: {str(import_error)}")
+            rag_result = await generate_basic_response(
+                query=message.content,
+                college_id=college_id
+            )
+            response_metadata["fallback_used"] = True
+            response_metadata["rag_used"] = False
                 
         except Exception as e:
-            logger.error(f"Unexpected error during RAG processing for user {message.user_id}: {str(e)}")
-            response_metadata["error_details"] = f"Unexpected error: {str(e)}"
-            
-            # Final fallback to basic chat
-            try:
-                rag_result = await generate_basic_response(
-                    query=message.content,
-                    college_id=college_id
-                )
-                response_metadata["fallback_used"] = True
-                logger.info(f"Final fallback to basic chat successful")
-            except Exception as fallback_error:
-                logger.error(f"All fallback mechanisms failed: {str(fallback_error)}")
-                raise HTTPException(status_code=503, detail="All chat services are temporarily unavailable")
+            # Check if this is a RAG-specific error (only if RAG is available)
+            if rag_available and EmbeddingServiceError and isinstance(e, EmbeddingServiceError):
+                logger.error(f"Embedding service error for user {message.user_id}: {str(e)}")
+                response_metadata["error_details"] = f"AI service error: {str(e)}"
+                
+                # Fallback to basic chat for embedding service errors
+                try:
+                    rag_result = await generate_basic_response(
+                        query=message.content,
+                        college_id=college_id
+                    )
+                    response_metadata["fallback_used"] = True
+                    logger.info(f"Fallback to basic chat successful for user {message.user_id}")
+                except Exception as fallback_error:
+                    logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
+                    raise HTTPException(status_code=503, detail="AI services are temporarily unavailable")
+            elif rag_available and VectorStoreError and isinstance(e, VectorStoreError):
+                logger.error(f"Vector store error for user {message.user_id}: {str(e)}")
+                response_metadata["error_details"] = f"Document search error: {str(e)}"
+                
+                # Fallback to basic chat for vector store errors
+                try:
+                    rag_result = await generate_basic_response(
+                        query=message.content,
+                        college_id=college_id
+                    )
+                    response_metadata["fallback_used"] = True
+                    logger.info(f"Fallback to basic chat successful after vector store error")
+                except Exception as fallback_error:
+                    logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
+                    raise HTTPException(status_code=503, detail="Document search is temporarily unavailable")
+            elif rag_available and RAGError and isinstance(e, RAGError):
+                logger.error(f"RAG system error for user {message.user_id}: {str(e)}")
+                response_metadata["error_details"] = f"RAG system error: {str(e)}"
+                
+                # Fallback to basic chat for general RAG errors
+                try:
+                    rag_result = await generate_basic_response(
+                        query=message.content,
+                        college_id=college_id
+                    )
+                    response_metadata["fallback_used"] = True
+                    logger.info(f"Fallback to basic chat successful after RAG error")
+                except Exception as fallback_error:
+                    logger.error(f"Basic chat fallback failed: {str(fallback_error)}")
+                    raise HTTPException(status_code=503, detail="Chat service is temporarily unavailable")
+            else:
+                # Generic exception - fallback to basic chat
+                logger.error(f"Unexpected error during RAG processing for user {message.user_id}: {str(e)}")
+                response_metadata["error_details"] = f"Unexpected error: {str(e)}"
+                
+                # Final fallback to basic chat
+                try:
+                    rag_result = await generate_basic_response(
+                        query=message.content,
+                        college_id=college_id
+                    )
+                    response_metadata["fallback_used"] = True
+                    logger.info(f"Final fallback to basic chat successful")
+                except Exception as fallback_error:
+                    logger.error(f"All fallback mechanisms failed: {str(fallback_error)}")
+                    raise HTTPException(status_code=503, detail="All chat services are temporarily unavailable")
         
         # Ensure we have a valid response
         if not rag_result or not rag_result.get("response"):
@@ -1043,30 +1142,50 @@ async def guest_chat(request: GuestChatRequest):
 
 @app.get("/chat/history/")
 async def get_chat_history(user_id: UUID):
+    """Get list of conversations for a user."""
     try:
-        conv_response = supabase.table("conversations").select("*").eq("user_id", str(user_id)).order("created_at", desc=True).execute()
+        conv_response = supabase.table("conversations").select("id, title, created_at, updated_at, college_id").eq("user_id", str(user_id)).order("created_at", desc=True).execute()
         return conv_response.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-        validation_errors = config_manager.validate_current_config()
+
+
+@app.get("/chat/conversation/{conversation_id}/messages")
+async def get_conversation_messages(
+    conversation_id: UUID,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get all messages for a specific conversation."""
+    try:
+        user_id = current_user["user_id"]
+        client = get_service_client()
+        
+        # Verify user owns this conversation
+        conv_check = client.table("conversations").select("user_id").eq("id", str(conversation_id)).execute()
+        if not conv_check.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        if conv_check.data[0]["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+        
+        # Get messages for this conversation
+        messages_response = (
+            client.table("messages")
+            .select("id, role, content, created_at, metadata")
+            .eq("conversation_id", str(conversation_id))
+            .order("created_at")
+            .execute()
+        )
         
         return {
-            "status": "success",
-            "is_valid": len(validation_errors) == 0,
-            "validation_errors": validation_errors,
-            "error_count": len(validation_errors),
-            "timestamp": datetime.now(dt.UTC).isoformat()
+            "conversation_id": str(conversation_id),
+            "messages": messages_response.data or []
         }
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to validate configuration: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to validate configuration")
-async def get_chat_history(user_id: UUID):
-    try:
-        conv_response = supabase.table("conversations").select("*").eq("user_id", str(user_id)).order("created_at", desc=True).execute()
-        return conv_response.data
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Failed to get conversation messages: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get conversation messages: {str(e)}")
 
 @app.post("/admin/upload")
 async def upload_document(
