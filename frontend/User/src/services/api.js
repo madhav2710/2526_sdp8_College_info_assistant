@@ -88,9 +88,13 @@ export const userAPI = {
     }
 
     // Otherwise, use the anonymous guest chat endpoint (no per-user history)
+    // Pass collegeId if available (for guest users who selected a college)
     return apiRequest('/guest-chat', {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ 
+        content,
+        college_id: collegeId || null
+      }),
     });
   },
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { userAPI } from '../services/api';
+import CollegeSelector from './CollegeSelector';
 import {
     ArrowUpIcon,
     User,
@@ -20,10 +21,35 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
     const [messages, setMessages] = useState([]);
     const [isSending, setIsSending] = useState(false);
     const [isProcessingRAG, setIsProcessingRAG] = useState(false);
+    // Initialize selected college from user's college or localStorage (for guests)
+    const [selectedCollegeId, setSelectedCollegeId] = useState(() => {
+        if (user?.collegeId) {
+            return user.collegeId;
+        }
+        // For guests, try to get from localStorage
+        const saved = localStorage.getItem('selectedCollegeId');
+        return saved || null;
+    });
     const conversationIdRef = useRef(conversationId || window.crypto.randomUUID());
     const messagesEndRef = useRef(null);
     const inputRef = useRef(null);
     const messagesContainerRef = useRef(null);
+
+    // Update selected college when user logs in/out or college changes
+    useEffect(() => {
+        if (user?.collegeId) {
+            setSelectedCollegeId(user.collegeId);
+        }
+    }, [user?.collegeId]);
+
+    // Persist selected college to localStorage for guests
+    useEffect(() => {
+        if (!user && selectedCollegeId) {
+            localStorage.setItem('selectedCollegeId', selectedCollegeId);
+        } else if (!user && !selectedCollegeId) {
+            localStorage.removeItem('selectedCollegeId');
+        }
+    }, [selectedCollegeId, user]);
 
     // Update conversation ID when prop changes
     useEffect(() => {
@@ -76,6 +102,12 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
         const trimmed = inputValue.trim();
         if (!trimmed || isSending) return;
 
+        // Warn if no college is selected
+        if (!selectedCollegeId && !user?.collegeId) {
+            alert('Please select a college first to get accurate information.');
+            return;
+        }
+
         const userMessage = { role: 'user', content: trimmed, timestamp: new Date() };
         setMessages(prev => [...prev, userMessage]);
         setInputValue("");
@@ -83,10 +115,13 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
         setIsProcessingRAG(true);
 
         try {
+            // Use selected college (for guests) or user's college (for logged-in users)
+            const collegeIdToUse = selectedCollegeId || user?.collegeId;
+            
             const data = await userAPI.sendMessage(
                 conversationIdRef.current,
                 user?.userId,
-                user?.collegeId,
+                collegeIdToUse,
                 trimmed
             );
 
@@ -248,7 +283,7 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
                         Welcome to College Information Chatbot
                     </h2>
                     <p className="text-slate-600 text-base sm:text-lg max-w-xl mx-auto leading-relaxed">
-                        Ask me anything about your college! I can help with admissions, courses, facilities, and more.
+                        Select a college above and ask me anything! I can help with admissions, courses, facilities, and more.
                     </p>
                 </div>
                 <div className="flex flex-col sm:flex-row flex-wrap gap-3 justify-center pt-2">
@@ -271,6 +306,20 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
 
     return (
         <div className="flex flex-col h-[calc(100vh-180px)] w-full max-w-4xl mx-auto">
+            {/* College Selector - Always visible */}
+            <div className="px-4 sm:px-6 lg:px-8 pt-4 pb-2">
+                <CollegeSelector
+                    selectedCollegeId={selectedCollegeId}
+                    onCollegeChange={setSelectedCollegeId}
+                />
+                {!selectedCollegeId && !user?.collegeId && (
+                    <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        Please select a college to get accurate information about that institution.
+                    </p>
+                )}
+            </div>
+
             {/* Messages Container */}
             <div 
                 className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 custom-scrollbar min-h-0" 
