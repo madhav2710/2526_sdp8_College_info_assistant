@@ -364,6 +364,7 @@ async def trigger_manual_rag_processing(
 
 class GuestChatRequest(BaseModel):
     content: str
+    college_id: Optional[str] = None
 
 
 class SignupRequest(BaseModel):
@@ -1109,21 +1110,29 @@ async def guest_chat(request: GuestChatRequest):
     Anonymous chat endpoint.
     - Does NOT require authentication
     - Does NOT store history per user
-    - Uses a default college (first available) for basic responses
+    - Uses selected college_id or defaults to first available college
     """
     try:
         client = get_service_client()
 
-        # Pick the first available college as the default context
-        colleges_resp = client.table("colleges").select("id").limit(1).execute()
-        colleges = getattr(colleges_resp, "data", None) or colleges_resp.data
-        if not colleges:
-            return {
-                "content": "The system is not fully configured yet (no colleges found). Please contact the administrator.",
-                "sources": [],
-            }
-
-        college_id = colleges[0]["id"]
+        # Use provided college_id or pick the first available college as default
+        college_id = None
+        if request.college_id:
+            # Validate the provided college_id
+            college_check = client.table("colleges").select("id").eq("id", request.college_id).limit(1).execute()
+            if college_check.data:
+                college_id = request.college_id
+        
+        if not college_id:
+            # Pick the first available college as the default context
+            colleges_resp = client.table("colleges").select("id").limit(1).execute()
+            colleges = getattr(colleges_resp, "data", None) or colleges_resp.data
+            if not colleges:
+                return {
+                    "content": "The system is not fully configured yet (no colleges found). Please contact the administrator.",
+                    "sources": [],
+                }
+            college_id = colleges[0]["id"]
 
         rag_result = await generate_basic_response(
             query=request.content,
