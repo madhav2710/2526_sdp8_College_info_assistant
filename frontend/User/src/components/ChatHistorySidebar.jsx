@@ -54,7 +54,11 @@ const ChatHistorySidebar = ({ isOpen, onToggle, onSelectConversation, currentCon
         }
         
         try {
+            await userAPI.deleteConversation(conversationId);
             setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+            if (currentConversationId === conversationId && onNewChat) {
+                onNewChat();
+            }
         } catch (error) {
             console.error('Failed to delete conversation:', error);
         }

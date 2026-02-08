@@ -14,40 +14,11 @@ import {
   ShieldCheck,
   Filter,
   RefreshCw,
-  Info
+  Info,
+  Trash2
 } from 'lucide-react';
 
-// Mock Initial Data
-const INITIAL_DOCS = [
-  { id: '1', name: 'CS_Syllabus_2024.pdf', type: 'Syllabus', size: '2.4 MB', status: 'Ingested', date: '2023-12-01' },
-  { id: '2', name: 'Placement_Report_Q3.pdf', type: 'Placement', size: '1.8 MB', status: 'Ingested', date: '2023-11-28' },
-  { id: '3', name: 'Campus_Overview_Brochure.pdf', type: 'Overview', size: '5.2 MB', status: 'Pending', date: '2023-12-20' },
-  { id: '4', name: 'Exam_Schedule_Winter.pdf', type: 'Notice', size: '840 KB', status: 'Failed', date: '2023-12-15' }
-];
-
-const INITIAL_HISTORY = [
-  {
-    id: 'q1',
-    query: 'What are the placement statistics for Amazon?',
-    user: 'Student_992',
-    timestamp: '2023-12-22 10:30 AM',
-    sources: ['Placement_Report_Q3.pdf']
-  },
-  {
-    id: 'q2',
-    query: 'When is the CS major project submission?',
-    user: 'Student_104',
-    timestamp: '2023-12-22 09:15 AM',
-    sources: ['CS_Syllabus_2024.pdf']
-  },
-  {
-    id: 'q3',
-    query: 'Is there a campus map available?',
-    user: 'Visitor_44',
-    timestamp: '2023-12-21 04:45 PM',
-    sources: ['Campus_Overview_Brochure.pdf']
-  }
-];
+const INITIAL_HISTORY = [];
 
 const StatusBadge = ({ status, ragStatus }) => {
   const styles = {
@@ -60,7 +31,9 @@ const StatusBadge = ({ status, ragStatus }) => {
     'RAG Processing': 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     Ingesting: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     Failed: 'bg-red-100 text-red-700 border-red-200',
-    Approved: 'bg-indigo-100 text-indigo-700 border-indigo-200'
+    Approved: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+    Uploaded: 'bg-slate-100 text-slate-700 border-slate-200',
+    Rejected: 'bg-gray-100 text-gray-700 border-gray-200'
   };
 
   const icons = {
@@ -73,7 +46,9 @@ const StatusBadge = ({ status, ragStatus }) => {
     'RAG Processing': <RefreshCw size={14} className="mr-1 animate-spin" />,
     Ingesting: <RefreshCw size={14} className="mr-1 animate-spin" />,
     Failed: <AlertCircle size={14} className="mr-1" />,
-    Approved: <CheckCircle size={14} className="mr-1" />
+    Approved: <CheckCircle size={14} className="mr-1" />,
+    Uploaded: <Upload size={14} className="mr-1" />,
+    Rejected: <AlertCircle size={14} className="mr-1" />
   };
 
   // Determine display status based on document status and RAG readiness
@@ -82,14 +57,14 @@ const StatusBadge = ({ status, ragStatus }) => {
     displayStatus = 'RAG Ready';
   } else if (status === 'Processing' && ragStatus?.processing_progress) {
     displayStatus = 'RAG Processing';
-  } else if (status === 'pending_approval') {
+  } else if (status === 'Pending Approval' || status === 'Pending_approval' || status === 'pending_approval') {
     displayStatus = 'Pending Approval';
   }
 
   return (
-    <span className={`flex items-center w-fit px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[displayStatus] || styles[status]}`}>
-      {icons[displayStatus] || icons[status]}
-      {displayStatus}
+    <span className={`flex items-center w-fit px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[displayStatus] || styles[status] || styles.Pending}`}>
+      {icons[displayStatus] || icons[status] || icons.Pending}
+      {displayStatus.replace(/_/g, ' ')}
     </span>
   );
 };
@@ -102,6 +77,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [documents, setDocuments] = useState([]);
   const [history, setHistory] = useState(INITIAL_HISTORY);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [notification, setNotification] = useState(null);
@@ -129,6 +105,16 @@ const App = () => {
     setIsAuthenticated(false);
   };
 
+  const formatStatusLabel = (value) => {
+    if (!value) return 'Unknown';
+    const words = value.replace(/_/g, ' ').split(' ');
+    return words.map((word) => (word ? word[0].toUpperCase() + word.slice(1) : '')).join(' ');
+  };
+
+  const isAwaitingApproval = (rawStatus) => {
+    return ['pending_approval', 'pending', 'uploaded'].includes(rawStatus);
+  };
+
   // Fetch documents from API
   const fetchDocuments = async () => {
     if (!isAuthenticated) return;
@@ -141,7 +127,8 @@ const App = () => {
         name: doc.filename,
         type: doc.file_type && doc.file_type.includes('pdf') ? 'PDF' : (doc.file_type || 'Document').toUpperCase(),
         size: doc.file_size ? `${(doc.file_size / 1024 / 1024).toFixed(2)} MB` : 'Unknown',
-        status: doc.status.charAt(0).toUpperCase() + doc.status.slice(1),
+        status: formatStatusLabel(doc.status),
+        rawStatus: doc.status,
         date: doc.created_at ? doc.created_at.split('T')[0] : 'N/A',
         ragStatus: doc.rag_status || {
           is_rag_ready: false,
@@ -156,24 +143,68 @@ const App = () => {
     }
   };
 
+  const formatHistoryTimestamp = (dateValue) => {
+    if (!dateValue) return 'N/A';
+    try {
+      return new Date(dateValue).toLocaleString();
+    } catch {
+      return dateValue;
+    }
+  };
+
+  const fetchHistory = async (limit = 10) => {
+    if (!isAuthenticated) return;
+    setHistoryLoading(true);
+    try {
+      const data = await adminAPI.getQueryHistory(limit);
+      const items = data.query_history || [];
+      const mapped = items.map((item) => ({
+        id: item.id,
+        query: item.query,
+        user: item.title || 'Conversation',
+        timestamp: formatHistoryTimestamp(item.created_at),
+        sources: item.sources || []
+      }));
+      setHistory(mapped);
+    } catch (error) {
+      console.error('Error fetching query history:', error);
+      showNotification('Failed to load query history.', 'error');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleDeleteHistory = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this interaction?')) return;
+    try {
+      await adminAPI.deleteQueryHistory(id);
+      showNotification('Interaction deleted successfully.');
+      fetchHistory(activeTab === 'history' ? 50 : 10);
+    } catch (error) {
+      console.error('Error deleting interaction:', error);
+      showNotification('Failed to delete interaction.', 'error');
+    }
+  };
+
   React.useEffect(() => {
     if (isAuthenticated) {
       fetchDocuments();
+      fetchHistory(activeTab === 'history' ? 50 : 10);
       // Poll for updates every 10 seconds to see status changes
       const interval = setInterval(fetchDocuments, 10000);
       return () => clearInterval(interval);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, activeTab]);
 
   // Stats calculation with RAG processing metrics
   const stats = useMemo(
     () => ({
       total: documents.length,
-      ingested: documents.filter((d) => d.status === 'Completed' || d.status === 'Ingested').length,
+      ingested: documents.filter((d) => d.rawStatus === 'completed' || d.rawStatus === 'ingested').length,
       ragReady: documents.filter((d) => d.ragStatus?.is_rag_ready).length,
-      pending: documents.filter((d) => d.status === 'Processing' || d.status === 'Pending' || d.status === 'Pending_approval').length,
-      failed: documents.filter((d) => d.status === 'Failed').length,
-      processing: documents.filter((d) => d.status === 'Processing').length
+      pending: documents.filter((d) => d.rawStatus === 'processing' || isAwaitingApproval(d.rawStatus)).length,
+      failed: documents.filter((d) => d.rawStatus === 'failed').length,
+      processing: documents.filter((d) => d.rawStatus === 'processing').length
     }),
     [documents]
   );
@@ -210,7 +241,7 @@ const App = () => {
 
   const triggerRagProcessing = async (id) => {
     try {
-      setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Processing' } : doc)));
+      setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Processing', rawStatus: 'processing' } : doc)));
       
       await adminAPI.triggerRagProcessing(id);
       showNotification('RAG processing started successfully.');
@@ -228,18 +259,6 @@ const App = () => {
       fetchDocuments();
     }
   };
-
-  const triggerIngestion = (id) => {
-    setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Ingesting' } : doc)));
-
-    // Simulate ChromaDB ingestion process
-    setTimeout(() => {
-      setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Ingested' } : doc)));
-      showNotification('Document ingested into ChromaDB successfully.');
-    }, 3000);
-  };
-
-
 
   if (!isAuthenticated) {
     return (
@@ -440,7 +459,7 @@ const App = () => {
 
                 <div className="space-y-4">
                   {documents
-                    .filter((d) => d.status === 'Pending' || d.status === 'Processing' || d.status === 'Approved')
+                    .filter((d) => isAwaitingApproval(d.rawStatus) || d.rawStatus === 'processing' || d.rawStatus === 'approved' || d.rawStatus === 'failed')
                     .slice(0, 3)
                     .map((doc) => (
                       <div
@@ -454,7 +473,7 @@ const App = () => {
                           <div>
                             <p className="text-sm font-semibold truncate max-w-[150px]">{doc.name}</p>
                             <p className="text-xs text-slate-500">{doc.size}</p>
-                            {doc.status === 'Processing' && doc.processingProgress && (
+                            {doc.rawStatus === 'processing' && doc.processingProgress && (
                               <p className="text-xs text-blue-600 mt-1">
                                 RAG Processing...
                               </p>
@@ -462,15 +481,12 @@ const App = () => {
                           </div>
                         </div>
 
-                        {doc.status === 'Pending' ? (
-                          <button
-                            onClick={() => triggerIngestion(doc.id)}
-                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
-                          >
-                            <RefreshCw size={12} />
-                            Ingest Now
-                          </button>
-                        ) : doc.status === 'Approved' ? (
+                        {isAwaitingApproval(doc.rawStatus) ? (
+                          <div className="flex items-center gap-2 text-amber-600">
+                            <Clock size={14} />
+                            <span className="text-xs font-medium">Awaiting Approval</span>
+                          </div>
+                        ) : doc.rawStatus === 'approved' || doc.rawStatus === 'failed' ? (
                           <button
                             onClick={() => triggerRagProcessing(doc.id)}
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
@@ -478,16 +494,16 @@ const App = () => {
                             <RefreshCw size={12} />
                             Start RAG
                           </button>
-                        ) : (
+                        ) : doc.rawStatus === 'processing' ? (
                           <div className="flex items-center gap-2 text-blue-600">
                             <RefreshCw size={14} className="animate-spin" />
                             <span className="text-xs font-medium">Processing</span>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     ))}
 
-                  {documents.filter((d) => d.status === 'Pending' || d.status === 'Processing' || d.status === 'Approved').length === 0 && (
+                  {documents.filter((d) => isAwaitingApproval(d.rawStatus) || d.rawStatus === 'processing' || d.rawStatus === 'approved' || d.rawStatus === 'failed').length === 0 && (
                     <div className="text-center py-8">
                       <p className="text-slate-400 text-sm italic">No documents pending processing.</p>
                     </div>
@@ -507,7 +523,13 @@ const App = () => {
                 </div>
 
                 <div className="space-y-4">
-                  {history.slice(0, 3).map((item) => (
+                  {historyLoading && (
+                    <div className="text-sm text-slate-500">Loading recent queries...</div>
+                  )}
+                  {!historyLoading && history.length === 0 && (
+                    <div className="text-sm text-slate-400 italic">No recent queries yet.</div>
+                  )}
+                  {!historyLoading && history.slice(0, 3).map((item) => (
                     <div key={item.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                       <p className="text-sm text-slate-800 line-clamp-1 italic">&quot;{item.query}&quot;</p>
                       <div className="flex items-center justify-between mt-3">
@@ -622,12 +644,12 @@ const App = () => {
                                   <CheckCircle size={12} />
                                   Ready ({doc.ragStatus.chunk_count} chunks)
                                 </span>
-                              ) : doc.status === 'Processing' ? (
+                              ) : doc.rawStatus === 'processing' ? (
                                 <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
                                   <RefreshCw size={12} className="animate-spin" />
                                   Processing...
                                 </span>
-                              ) : doc.status === 'Completed' ? (
+                              ) : doc.rawStatus === 'completed' ? (
                                 <span className="text-xs text-yellow-600 font-medium flex items-center gap-1">
                                   <Clock size={12} />
                                   Indexing pending
@@ -642,16 +664,12 @@ const App = () => {
                           <td className="px-6 py-4 text-xs text-slate-500">{doc.date}</td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
-                              {doc.status === 'Pending' && (
-                                <button
-                                  onClick={() => triggerIngestion(doc.id)}
-                                  className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                  title="Ingest into ChromaDB"
-                                >
-                                  <RefreshCw size={16} />
-                                </button>
+                              {isAwaitingApproval(doc.rawStatus) && (
+                                <div className="p-2 text-amber-600" title="Awaiting super admin approval">
+                                  <Clock size={16} />
+                                </div>
                               )}
-                              {(doc.status === 'Approved' || doc.status === 'Failed') && (
+                              {(doc.rawStatus === 'approved' || doc.rawStatus === 'failed') && (
                                 <button
                                   onClick={() => triggerRagProcessing(doc.id)}
                                   className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
@@ -688,7 +706,13 @@ const App = () => {
               </div>
 
               <div className="divide-y divide-slate-100">
-                {history.map((item) => (
+                {historyLoading && (
+                  <div className="p-6 text-sm text-slate-500">Loading query history...</div>
+                )}
+                {!historyLoading && history.length === 0 && (
+                  <div className="p-6 text-sm text-slate-400 italic">No query history available.</div>
+                )}
+                {!historyLoading && history.map((item) => (
                   <div key={item.id} className="p-6 hover:bg-slate-50/50 transition-colors">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
@@ -697,9 +721,18 @@ const App = () => {
                         </span>
                         <span className="text-slate-400 text-xs">{item.timestamp}</span>
                       </div>
-                      <button className="text-slate-400 hover:text-indigo-600">
-                        <ChevronRight size={20} />
-                      </button>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleDeleteHistory(item.id)}
+                          className="text-slate-400 hover:text-red-600 transition-colors"
+                          title="Delete interaction"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                        <button className="text-slate-400 hover:text-indigo-600">
+                          <ChevronRight size={20} />
+                        </button>
+                      </div>
                     </div>
 
                     <p className="text-slate-900 font-medium mb-4">&quot;{item.query}&quot;</p>
@@ -708,15 +741,19 @@ const App = () => {
                       <span className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">
                         Verified Sources:
                       </span>
-                      {item.sources.map((source, i) => (
-                        <span
-                          key={i}
-                          className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600"
-                        >
-                          <FileText size={12} className="text-indigo-400" />
-                          {source}
-                        </span>
-                      ))}
+                      {item.sources.length === 0 ? (
+                        <span className="text-xs text-slate-400">No sources recorded</span>
+                      ) : (
+                        item.sources.map((source, i) => (
+                          <span
+                            key={i}
+                            className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600"
+                          >
+                            <FileText size={12} className="text-indigo-400" />
+                            {source}
+                          </span>
+                        ))
+                      )}
                     </div>
                   </div>
                 ))}

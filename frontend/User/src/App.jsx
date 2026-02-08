@@ -1,20 +1,19 @@
 import { useState, useEffect } from "react"
 import ChatInterface from "./components/ChatInterface"
 import ChatHistorySidebar from "./components/ChatHistorySidebar"
-import SuperAdminPanel from "./components/SuperAdminPanel"
 import Login from "./components/Login"
 import ProfileCard from "./components/ProfileCard"
 import { AuthProvider, useAuth } from "./context/AuthContext"
-import { Sparkles, MessageSquare, GraduationCap, Menu, X } from "lucide-react"
+import { MessageSquare, GraduationCap, Menu, X } from "lucide-react"
 import "./index.css"
 
 function AppContent() {
-  const [showAdmin, setShowAdmin] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [currentConversationId, setCurrentConversationId] = useState(null)
   const { user, logout, loading } = useAuth()
+  const superAdminUrl = import.meta.env.VITE_SUPER_ADMIN_URL || "http://localhost:5173"
 
   // Auto-open sidebar on desktop when user logs in
   useEffect(() => {
@@ -22,12 +21,6 @@ function AppContent() {
       setSidebarOpen(true)
     }
   }, [user])
-
-  useEffect(() => {
-    if (user?.role === 'super_admin') {
-      setShowAdmin(true);
-    }
-  }, [user]);
 
   if (loading) {
     return (
@@ -77,16 +70,39 @@ function AppContent() {
     )
   }
 
-  if (showAdmin) {
+  if (user?.role === 'super_admin') {
     return (
-      <div className="relative">
-        <button
-          onClick={() => setShowAdmin(false)}
-          className="fixed bottom-4 right-4 z-[300] bg-slate-800 text-white px-4 py-2 rounded-lg shadow-lg font-bold text-xs hover:bg-slate-900 transition-colors"
+      <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 gap-6 p-4">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl mb-4 shadow-xl">
+            <MessageSquare className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-2">
+            Super Admin Dashboard
+          </h1>
+          <p className="text-slate-600 text-lg">Your dashboard is hosted on a separate secure portal.</p>
+        </div>
+
+        <a
+          href={superAdminUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group flex items-center gap-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-2xl hover:shadow-blue-500/50 transition-all hover:scale-105"
         >
-          Exit Admin
+          <span>Launch Super Admin Dashboard</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:translate-x-1 transition-transform">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </a>
+
+        <button
+          onClick={logout}
+          className="mt-4 text-slate-600 hover:text-red-600 font-semibold underline decoration-2 underline-offset-4 transition-colors"
+        >
+          Sign Out
         </button>
-        <SuperAdminPanel />
       </div>
     )
   }
@@ -129,15 +145,6 @@ function AppContent() {
 
             {/* Right side actions */}
             <div className="flex items-center gap-3 relative z-[1001]">
-              {user?.role === 'super_admin' && (
-                <button
-                  onClick={() => setShowAdmin(true)}
-                  className="hidden sm:flex items-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 rounded-lg shadow-lg font-semibold text-sm hover:shadow-xl transition-all hover:scale-105"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  Super Admin
-                </button>
-              )}
               {user ? (
                 <ProfileCard />
               ) : (

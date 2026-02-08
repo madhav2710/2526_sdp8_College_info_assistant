@@ -28,3 +28,4 @@ Thumbs.db
 /.clinerules
 backend/CHECKPOINT_VERIFICATION.md
 RAG_IMPROVEMENTS_GUIDE.md
+/backend/.venv

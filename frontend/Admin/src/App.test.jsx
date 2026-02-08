@@ -4,9 +4,14 @@ import { vi } from 'vitest';
 
 global.fetch = vi.fn();
 
+let mockDocumentsResponse = [];
+let mockHistoryResponse = { query_history: [], total_conversations: 0 };
+
 describe('Admin Dashboard', () => {
   beforeEach(() => {
     fetch.mockClear();
+    mockDocumentsResponse = [];
+    mockHistoryResponse = { query_history: [], total_conversations: 0 };
     // Mock localStorage
     const localStorageMock = (function() {
       let store = {};
@@ -30,11 +35,33 @@ describe('Admin Dashboard', () => {
     // Set mock token to bypass login
     window.localStorage.setItem('admin_token', 'mock-token');
 
-    // Default mock for the initial fetchDocuments call
-    fetch.mockResolvedValue({
-      ok: true,
-      json: async () => [],
-    });
+    // Default mock for API calls
+      mockDocumentsResponse = [];
+      mockHistoryResponse = { query_history: [], total_conversations: 0 };
+      fetch.mockImplementation((url) => {
+        if (url.includes('/admin/query-history')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => mockHistoryResponse,
+          });
+        }
+        if (url.includes('/admin/trigger-rag-processing')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ status: 'success' }),
+          });
+        }
+        if (url.includes('/admin/documents')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => mockDocumentsResponse,
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({}),
+        });
+      });
   });
 
   test('renders login screen when not authenticated', () => {
@@ -110,13 +137,7 @@ describe('Admin Dashboard', () => {
 
     
 
-        fetch.mockResolvedValueOnce({
-
-          ok: true,
-
-          json: async () => mockDocs,
-
-        });
+        mockDocumentsResponse = mockDocs;
 
     
 
@@ -153,10 +174,7 @@ describe('Admin Dashboard', () => {
           { id: '3', filename: 'doc3.pdf', file_type: 'application/pdf', status: 'failed', created_at: '2023-12-03T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -189,25 +207,81 @@ describe('Admin Dashboard', () => {
           const actionMenuButtons = document.querySelectorAll('.lucide-more-vertical');
           expect(actionMenuButtons).toHaveLength(0);
 
-          // Verify ingest button is present only for pending documents by checking for lucide-refresh-cw class
-          const ingestButtons = document.querySelectorAll('.lucide-refresh-cw');
-          expect(ingestButtons.length).toBeGreaterThan(0); // Should have at least one for pending document
+          // Pending should show Clock icon (awaiting approval)
+          const pendingIcons = document.querySelectorAll('.lucide-clock');
+          expect(pendingIcons.length).toBeGreaterThan(0);
 
-          // Verify table layout integrity - action column should still exist but only contain ingest buttons for pending docs
+          // Failed should show RefreshCw (trigger RAG)
+          const ragButtons = document.querySelectorAll('.lucide-refresh-cw');
+          expect(ragButtons.length).toBeGreaterThan(0);
+
+          // Verify table layout integrity - action column should still exist
           const actionCells = document.querySelectorAll('td:last-child');
           expect(actionCells).toHaveLength(3); // One for each document row
         });
       });
 
-      test('verifies hover states work correctly for remaining buttons', async () => {
-        const mockDocs = [
-          { id: '1', filename: 'doc1.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
-        ];
+      test('verifies query history is displayed and can be deleted', async () => {
+        const mockHistory = {
+          query_history: [
+            { id: 'h1', query: 'What are the placement stats?', title: 'Placement Query', created_at: '2023-12-05T10:00:00Z', sources: ['doc1.pdf'] },
+          ],
+          total_conversations: 1
+        };
 
+        // First call for initial load
+          mockDocumentsResponse = { documents: [] };
+          mockHistoryResponse = mockHistory;
+
+        render(<App />);
+
+        // Switch to history tab
+        const historyTab = screen.getByText('Query History');
+        fireEvent.click(historyTab);
+
+        await waitFor(() => {
+          expect(screen.getByText('Knowledge Base Interactions')).toBeInTheDocument();
+          expect(screen.getByText(/"What are the placement stats\?"/)).toBeInTheDocument();
+          expect(screen.getByText('doc1.pdf')).toBeInTheDocument();
+        });
+
+        // Test deletion
+        const deleteBtn = screen.getByTitle('Delete interaction');
+        expect(deleteBtn).toBeInTheDocument();
+
+        // Mock confirmation
+        window.confirm = vi.fn(() => true);
+        
         fetch.mockResolvedValueOnce({
           ok: true,
-          json: async () => mockDocs,
+          json: async () => ({ status: 'success' }),
         });
+
+        fireEvent.click(deleteBtn);
+
+        await waitFor(() => {
+          expect(fetch).toHaveBeenCalledWith(
+            expect.stringContaining('/admin/query-history/h1'),
+            expect.objectContaining({ method: 'DELETE' })
+          );
+        });
+      });
+
+      test('verifies document list with RAG status', async () => {
+        const mockDocs = {
+          documents: [
+            { 
+              id: '1', 
+              filename: 'doc1.pdf', 
+              file_type: 'application/pdf', 
+              status: 'completed', 
+              created_at: '2023-12-01T10:00:00Z',
+              rag_status: { is_rag_ready: true, chunk_count: 10, can_be_queried: true }
+            },
+          ]
+        };
+
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -216,7 +290,25 @@ describe('Admin Dashboard', () => {
         fireEvent.click(docsTab);
 
         await waitFor(() => {
-          // Find the ingest button by looking for the refresh icon and its parent button
+          expect(screen.getByText('Ready (10 chunks)')).toBeInTheDocument();
+        });
+      });
+
+      test('verifies hover states work correctly for remaining buttons', async () => {
+        const mockDocs = [
+          { id: '1', filename: 'doc1.pdf', file_type: 'application/pdf', status: 'approved', created_at: '2023-12-01T10:00:00Z' },
+        ];
+
+        mockDocumentsResponse = mockDocs;
+
+        render(<App />);
+
+        // Switch to documents tab
+        const docsTab = screen.getAllByText(/Documents/i).find(el => el.tagName === 'BUTTON');
+        fireEvent.click(docsTab);
+
+        await waitFor(() => {
+          // Find the RAG trigger button by looking for the refresh icon and its parent button
           const ingestIcon = document.querySelector('.lucide-refresh-cw');
           expect(ingestIcon).toBeInTheDocument();
           
@@ -224,7 +316,7 @@ describe('Admin Dashboard', () => {
           expect(ingestButton).toBeInTheDocument();
 
           // Verify button has hover classes
-          expect(ingestButton).toHaveClass('hover:bg-indigo-50');
+          expect(ingestButton).toHaveClass('hover:bg-emerald-50');
           
           // Test hover interaction
           fireEvent.mouseEnter(ingestButton);
@@ -240,10 +332,7 @@ describe('Admin Dashboard', () => {
           { id: '1', filename: 'very-long-document-name-that-might-cause-layout-issues.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -272,10 +361,7 @@ describe('Admin Dashboard', () => {
           { id: '3', filename: 'exam_schedule.pdf', file_type: 'application/pdf', status: 'failed', created_at: '2023-12-03T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -324,10 +410,7 @@ describe('Admin Dashboard', () => {
           { id: '1', filename: 'doc1.pdf', file_type: 'application/pdf', status: 'completed', created_at: '2023-12-01T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -346,15 +429,12 @@ describe('Admin Dashboard', () => {
       test('verifies status badges display correctly for all statuses', async () => {
         const mockDocs = [
           { id: '1', filename: 'completed_doc.pdf', file_type: 'application/pdf', status: 'completed', created_at: '2023-12-01T10:00:00Z' },
-          { id: '2', filename: 'pending_doc.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-02T10:00:00Z' },
+          { id: '2', filename: 'pending_doc.pdf', file_type: 'application/pdf', status: 'pending_approval', created_at: '2023-12-02T10:00:00Z' },
           { id: '3', filename: 'failed_doc.pdf', file_type: 'application/pdf', status: 'failed', created_at: '2023-12-03T10:00:00Z' },
           { id: '4', filename: 'processing_doc.pdf', file_type: 'application/pdf', status: 'processing', created_at: '2023-12-04T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -365,7 +445,7 @@ describe('Admin Dashboard', () => {
         await waitFor(() => {
           // Verify all status badges are displayed with correct text
           expect(screen.getByText('Completed')).toBeInTheDocument();
-          expect(screen.getByText('Pending')).toBeInTheDocument();
+          expect(screen.getByText('Pending Approval')).toBeInTheDocument();
           expect(screen.getByText('Failed')).toBeInTheDocument();
           expect(screen.getByText('Processing')).toBeInTheDocument();
 
@@ -373,7 +453,7 @@ describe('Admin Dashboard', () => {
           const completedBadge = screen.getByText('Completed').closest('span');
           expect(completedBadge).toHaveClass('bg-green-100', 'text-green-700', 'border-green-200');
 
-          const pendingBadge = screen.getByText('Pending').closest('span');
+          const pendingBadge = screen.getByText('Pending Approval').closest('span');
           expect(pendingBadge).toHaveClass('bg-yellow-100', 'text-yellow-700', 'border-yellow-200');
 
           const failedBadge = screen.getByText('Failed').closest('span');
@@ -384,16 +464,13 @@ describe('Admin Dashboard', () => {
         });
       });
 
-      test('verifies ingest functionality for pending documents', async () => {
+      test('verifies pending documents show awaiting approval', async () => {
         const mockDocs = [
           { id: '1', filename: 'pending_doc.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
           { id: '2', filename: 'completed_doc.pdf', file_type: 'application/pdf', status: 'completed', created_at: '2023-12-02T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
 
         render(<App />);
 
@@ -402,32 +479,29 @@ describe('Admin Dashboard', () => {
         fireEvent.click(docsTab);
 
         await waitFor(() => {
-          // Verify ingest button is only present for pending documents
-          const ingestButtons = document.querySelectorAll('.lucide-refresh-cw');
-          expect(ingestButtons).toHaveLength(1); // Only one pending document
+          // Pending document should show clock icon and no action button
+          const pendingRow = screen.getByText('pending_doc.pdf').closest('tr');
+          const pendingActionCell = pendingRow.querySelector('td:last-child');
+          const pendingClock = pendingActionCell.querySelector('.lucide-clock');
+          const pendingRagButton = pendingActionCell.querySelector('.lucide-refresh-cw');
+          expect(pendingClock).toBeInTheDocument();
+          expect(pendingRagButton).toBeNull();
 
-          // Find the ingest button and verify it's clickable
-          const ingestButton = ingestButtons[0].closest('button');
-          expect(ingestButton).toBeInTheDocument();
-          expect(ingestButton).toHaveAttribute('title', 'Ingest into ChromaDB');
-
-          // Verify completed document doesn't have ingest button
+          // Completed document shouldn't have a trigger button
           const completedRow = screen.getByText('completed_doc.pdf').closest('tr');
           const completedActionCell = completedRow.querySelector('td:last-child');
-          const completedIngestButton = completedActionCell.querySelector('.lucide-refresh-cw');
-          expect(completedIngestButton).toBeNull();
+          const completedRagButton = completedActionCell.querySelector('.lucide-refresh-cw');
+          expect(completedRagButton).toBeNull();
         });
       });
 
-      test('verifies ingest button functionality and status change', async () => {
+      test('verifies start RAG button triggers processing', async () => {
         const mockDocs = [
-          { id: '1', filename: 'pending_doc.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
+          { id: '1', filename: 'approved_doc.pdf', file_type: 'application/pdf', status: 'approved', created_at: '2023-12-01T10:00:00Z' },
         ];
 
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
+        mockDocumentsResponse = mockDocs;
+        mockHistoryResponse = { query_history: [], total_conversations: 0 };
 
         render(<App />);
 
@@ -436,22 +510,16 @@ describe('Admin Dashboard', () => {
         fireEvent.click(docsTab);
 
         await waitFor(() => {
-          expect(screen.getByText('Pending')).toBeInTheDocument();
+          expect(screen.getByText('Approved')).toBeInTheDocument();
         });
 
-        // Click the ingest button
-        const ingestButton = document.querySelector('.lucide-refresh-cw').closest('button');
-        fireEvent.click(ingestButton);
+        const ragButton = document.querySelector('.lucide-refresh-cw').closest('button');
+        fireEvent.click(ragButton);
 
-        // Verify status changes to "Ingesting" immediately
+        // Verify status changes to "Processing" immediately
         await waitFor(() => {
-          expect(screen.getByText('Ingesting')).toBeInTheDocument();
+          expect(screen.getByText('Processing')).toBeInTheDocument();
         });
-
-        // Wait for the simulated ingestion to complete (3 seconds in the code)
-        await waitFor(() => {
-          expect(screen.getByText('Ingested')).toBeInTheDocument();
-        }, { timeout: 4000 });
       });
 
       test('verifies document upload functionality is preserved', async () => {

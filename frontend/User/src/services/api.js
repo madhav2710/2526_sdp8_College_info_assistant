@@ -106,6 +106,12 @@ export const userAPI = {
     return apiRequest(`/chat/conversation/${conversationId}/messages`);
   },
 
+  deleteConversation: async (conversationId) => {
+    return apiRequest(`/chat/conversation/${conversationId}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Notifications
   getNotifications: async (params = {}) => {
     const queryParams = new URLSearchParams();

@@ -81,6 +81,12 @@ export const adminAPI = {
     return apiRequest(`/admin/query-history?limit=${limit}`);
   },
 
+  deleteQueryHistory: async (conversationId) => {
+    return apiRequest(`/admin/query-history/${conversationId}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Notifications
   getNotifications: async (params = {}) => {
     const queryParams = new URLSearchParams();
