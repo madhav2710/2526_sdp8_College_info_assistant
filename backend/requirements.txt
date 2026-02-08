@@ -1,0 +1,23 @@
+fastapi
+uvicorn[standard]
+supabase
+python-dotenv
+httpx
+requests
+pypdf
+# google.generativeai (Google Generative AI SDK) — install manually if needed:
+# pip install google-generative-ai
+# If installing from source is required, use a VCS URL, for example:
+# pip install "git+https://github.com/googleapis/generative-ai-python.git"
+numpy
+psycopg2-binary
+pydantic
+python-multipart
+pytest
+pytest-asyncio
+httpx
+# Optional / development extras (uncomment if needed)
+langchain
+faiss-cpu
+langchain-community
+langchain-google-genai

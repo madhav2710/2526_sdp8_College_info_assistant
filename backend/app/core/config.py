@@ -267,16 +267,21 @@ class SystemConfig:
         
         return all_errors
     
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert configuration to dictionary for serialization"""
+    def to_dict(self, include_sensitive: bool = False) -> Dict[str, Any]:
+        """
+        Convert configuration to dictionary for serialization.
+        
+        Args:
+            include_sensitive: Whether to include sensitive keys (default False)
+        """
         return {
             "database": {
                 "supabase_url": self.database.supabase_url,
-                "supabase_key": "***REDACTED***",  # Don't expose sensitive keys
-                "supabase_service_role_key": "***REDACTED***"
+                "supabase_key": self.database.supabase_key if include_sensitive else "***REDACTED***",
+                "supabase_service_role_key": self.database.supabase_service_role_key if include_sensitive else "***REDACTED***"
             },
             "ai": {
-                "gemini_api_key": "***REDACTED***" if self.ai.gemini_api_key else None,
+                "gemini_api_key": (self.ai.gemini_api_key if include_sensitive else "***REDACTED***") if self.ai.gemini_api_key else None,
                 "embedding_model": self.ai.embedding_model,
                 "generation_model": self.ai.generation_model,
                 "max_retries": self.ai.max_retries,
@@ -291,7 +296,7 @@ class SystemConfig:
                 "max_chunks_per_query": self.rag.max_chunks_per_query
             },
             "security": {
-                "jwt_secret_key": "***REDACTED***",
+                "jwt_secret_key": self.security.jwt_secret_key if include_sensitive else "***REDACTED***",
                 "jwt_algorithm": self.security.jwt_algorithm,
                 "jwt_access_token_expire_minutes": self.security.jwt_access_token_expire_minutes
             },
@@ -433,6 +438,55 @@ class ConfigurationManager:
             logger.error(error_message)
             raise ConfigurationError(error_message)
     
+    def load_from_dict(self, config_data: Dict[str, Any]) -> SystemConfig:
+        """
+        Convert dictionary to SystemConfig object with validation.
+        
+        Args:
+            config_data: Dictionary containing configuration
+            
+        Returns:
+            SystemConfig: Validated system configuration
+        """
+        try:
+            database_config = DatabaseConfig(**config_data.get("database", {}))
+            
+            ai_data = config_data.get("ai", {})
+            ai_config = AIConfig(**ai_data)
+            
+            rag_config = RAGConfig(**config_data.get("rag", {}))
+            
+            security_config = SecurityConfig(**config_data.get("security", {}))
+            
+            file_config = FileConfig(**config_data.get("file", {}))
+            
+            rate_limit_config = RateLimitConfig(**config_data.get("rate_limit", {}))
+            
+            app_data = config_data.get("application", {})
+            if "log_level" in app_data:
+                app_data["log_level"] = LogLevel(app_data["log_level"])
+            application_config = ApplicationConfig(**app_data)
+            
+            system_config = SystemConfig(
+                database=database_config,
+                ai=ai_config,
+                rag=rag_config,
+                security=security_config,
+                file=file_config,
+                rate_limit=rate_limit_config,
+                application=application_config
+            )
+            
+            # Validate
+            errors = system_config.validate()
+            if errors:
+                raise ConfigValidationError("\n".join(errors))
+            
+            return system_config
+            
+        except (TypeError, ValueError) as e:
+            raise ConfigurationError(f"Failed to parse configuration dictionary: {str(e)}")
+
     def load_from_file(self, config_file_path: Union[str, Path]) -> SystemConfig:
         """
         Load configuration from JSON file with validation.
@@ -455,15 +509,16 @@ class ConfigurationManager:
             with open(config_path, 'r') as f:
                 config_data = json.load(f)
             
-            # TODO: Implement JSON to SystemConfig conversion
-            # This would allow loading configuration from files
-            # For now, we primarily use environment variables
+            system_config = self.load_from_dict(config_data)
             
+            self._config = system_config
             self._config_file_path = config_path
-            logger.info(f"Configuration loaded from file: {config_path}")
             
-            # Fallback to environment for now
-            return self.load_from_environment()
+            # Configure external services
+            self._configure_external_services(system_config)
+            
+            logger.info(f"Configuration loaded from file: {config_path}")
+            return system_config
             
         except json.JSONDecodeError as e:
             raise ConfigurationError(f"Invalid JSON in configuration file: {str(e)}")
@@ -481,25 +536,33 @@ class ConfigurationManager:
             ConfigurationError: If configuration cannot be loaded
         """
         if self._config is None:
+            # Try loading from file if path is known
+            if self._config_file_path and self._config_file_path.exists():
+                try:
+                    return self.load_from_file(self._config_file_path)
+                except Exception as e:
+                    logger.warning(f"Failed to load from file {self._config_file_path}, falling back to environment: {str(e)}")
+            
             self._config = self.load_from_environment()
         return self._config
     
-    def update_config(self, updates: Dict[str, Any]) -> None:
+    def update_config(self, updates: Dict[str, Any], persist: bool = False) -> None:
         """
-        Dynamically update configuration parameters.
+        Dynamically update configuration parameters with validation.
         
         Args:
             updates: Dictionary of configuration updates
+            persist: Whether to save changes to config file (default False)
             
         Raises:
             ConfigUpdateError: If update fails or results in invalid configuration
         """
         if self._config is None:
-            raise ConfigUpdateError("No configuration loaded")
+            self.get_config()
         
         try:
-            # Create a copy of current configuration for validation
-            current_dict = self._config.to_dict()
+            # Create a copy of current configuration including sensitive fields
+            current_dict = self._config.to_dict(include_sensitive=True)
             
             # Apply updates (nested dictionary update)
             def update_nested_dict(d: dict, updates: dict):
@@ -511,9 +574,25 @@ class ConfigurationManager:
             
             update_nested_dict(current_dict, updates)
             
-            # TODO: Convert back to SystemConfig and validate
-            # For now, log the update attempt
-            logger.info(f"Configuration update requested: {updates}")
+            # Convert back to SystemConfig and validate
+            new_config = self.load_from_dict(current_dict)
+            
+            # Update internal state
+            self._config = new_config
+            
+            # Reconfigure external services
+            self._configure_external_services(new_config)
+            
+            # Persist if requested and file path exists
+            if persist and self._config_file_path:
+                try:
+                    with open(self._config_file_path, 'w') as f:
+                        json.dump(new_config.to_dict(include_sensitive=True), f, indent=2)
+                    logger.info(f"Configuration persisted to {self._config_file_path}")
+                except Exception as e:
+                    logger.error(f"Failed to persist configuration: {str(e)}")
+            
+            logger.info(f"Configuration dynamically updated: {updates}")
             
             # Notify watchers
             for watcher in self._watchers:
@@ -523,6 +602,7 @@ class ConfigurationManager:
                     logger.warning(f"Configuration watcher failed: {str(e)}")
             
         except Exception as e:
+            logger.error(f"Failed to update configuration: {str(e)}")
             raise ConfigUpdateError(f"Failed to update configuration: {str(e)}")
     
     def add_config_watcher(self, watcher: callable) -> None:

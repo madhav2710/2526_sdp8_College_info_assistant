@@ -43,12 +43,29 @@ def test_upload_document_success():
         pytest.fail("Dependency get_current_user not found")
 
     college_id = "test-college-id"
-    filename = "syllabus.pdf"
+    filename = "syllabus.txt"
 
     app.dependency_overrides[get_current_user] = mock_admin_user
 
-    # Mock the httpx client for storage and database operations
-    with patch("httpx.AsyncClient") as mock_httpx:
+    # Mock service client and httpx client for storage and database operations
+    with patch("main.get_service_client") as mock_get_service_client, \
+         patch("httpx.AsyncClient") as mock_httpx:
+        mock_service_client = MagicMock()
+        mock_get_service_client.return_value = mock_service_client
+
+        # Mock duplicate hash check and super admin lookup
+        mock_empty_response = MagicMock()
+        mock_empty_response.data = []
+
+        def mock_table_side_effect(table_name):
+            mock_table = MagicMock()
+            if table_name == "documents":
+                mock_table.select.return_value.eq.return_value.eq.return_value.in_.return_value.execute.return_value = mock_empty_response
+            elif table_name == "profiles":
+                mock_table.select.return_value.eq.return_value.execute.return_value = mock_empty_response
+            return mock_table
+
+        mock_service_client.table.side_effect = mock_table_side_effect
         mock_client = MagicMock()
         mock_httpx.return_value.__aenter__.return_value = mock_client
         mock_httpx.return_value.__aexit__.return_value = None
@@ -63,8 +80,8 @@ def test_upload_document_success():
         mock_db_response.json.return_value = [{
             "id": "doc-123",
             "filename": filename,
-            "file_type": "pdf",
-            "file_size": 16,  # Length of "fake pdf content"
+            "file_type": "txt",
+            "file_size": 17,  # Length of "fake text content"
             "status": "pending_approval",  # Updated to match new workflow
             "created_at": "2024-01-04T10:00:00Z"
         }]
@@ -82,7 +99,7 @@ def test_upload_document_success():
         
         mock_client.post = async_post
 
-        files = {"file": (filename, b"fake pdf content", "application/pdf")}
+        files = {"file": (filename, b"fake text content", "text/plain")}
         response = client.post(
             "/admin/upload",
             files=files,
@@ -97,7 +114,7 @@ def test_upload_document_success():
         assert response_data["document"]["id"] == "doc-123"
         assert response_data["document"]["filename"] == filename
         assert response_data["document"]["status"] == "pending_approval"  # Updated to match new workflow
-        assert response_data["document"]["file_size"] == 16
+        assert response_data["document"]["file_size"] == 17
 
     app.dependency_overrides = {}
 
@@ -271,7 +288,7 @@ def test_get_pending_documents_success():
         
         # Mock profile query response
         mock_profile_response = MagicMock()
-        mock_profile_response.data = [{"email": "admin@test.edu"}]
+        mock_profile_response.data = [{"full_name": "Admin User"}]
         
         # Configure the mock client to return different responses based on table
         def mock_table_side_effect(table_name):
@@ -295,7 +312,7 @@ def test_get_pending_documents_success():
         assert len(response_data["pending_documents"]) == 1
         assert response_data["pending_documents"][0]["filename"] == "test1.pdf"
         assert response_data["pending_documents"][0]["college_name"] == "Test College"
-        assert response_data["pending_documents"][0]["uploader_email"] == "admin@test.edu"
+        assert response_data["pending_documents"][0]["uploader_email"] == "Admin User"
         assert response_data["total_pending"] == 1
 
     app.dependency_overrides = {}
@@ -366,9 +383,9 @@ def test_approve_document_success():
                 assert response.status_code == 200
                 response_data = response.json()
                 assert response_data["status"] == "success"
-                assert "approved for processing" in response_data["message"].lower()
+                assert "has been approved" in response_data["message"].lower()
                 assert response_data["document"]["id"] == "550e8400-e29b-41d4-a716-446655440000"
-                assert response_data["document"]["status"] == "approved"
+                assert response_data["document"]["status"] == "processing"
                 
                 # Verify background task was added
                 mock_add_task.assert_called_once()

@@ -8,25 +8,15 @@ from uuid import uuid4
 
 # Import the app and create a test client with proper initialization
 from main import app
+from fastapi.testclient import TestClient
 
-# Try different TestClient imports based on version
+# We'll try to import the dependency.
 try:
-    from httpx import AsyncClient
-    import asyncio
-    
-    # Use httpx directly for testing
-    async def make_request(method, url, **kwargs):
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            return await client.request(method, url, **kwargs)
-    
-    # Helper function to run async tests
-    def run_async(coro):
-        return asyncio.run(coro)
-        
+    from app.core.auth import get_current_user
 except ImportError:
-    # Fallback to requests-based testing
-    from fastapi.testclient import TestClient
-    client = TestClient(app=app)
+    get_current_user = None
+
+client = TestClient(app=app)
 
 def test_create_chat_message():
     """Test the enhanced chat endpoint with proper mocking"""
@@ -34,9 +24,14 @@ def test_create_chat_message():
     user_id = str(uuid4())
     message_content = "Hello, I need the syllabus."
     
+    if get_current_user is None:
+        pytest.fail("Dependency get_current_user not found")
+
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": user_id, "role": "user", "college_id": "test-college-id"}
+
     with patch("main.get_service_client") as mock_get_client, \
-         patch("main.get_current_user") as mock_get_current_user, \
-         patch("app.core.rag.generate_rag_response") as mock_rag_response:
+        patch("main.get_current_user") as mock_get_current_user, \
+        patch("app.core.rag.generate_rag_response", new_callable=AsyncMock) as mock_rag_response:
         
         # Mock authentication
         mock_get_current_user.return_value = {"user_id": user_id, "role": "user"}
@@ -79,26 +74,22 @@ def test_create_chat_message():
             "fallback_used": False
         }
 
-        # Test using httpx if available, otherwise skip
-        try:
-            response = run_async(make_request("POST", "/chat/", json={
-                "conversation_id": conv_id,
-                "user_id": user_id,
-                "role": "user",
-                "content": message_content
-            }))
-            
-            assert response.status_code == 200
-            response_data = response.json()
-            assert response_data["status"] == "success"
-            assert response_data["role"] == "assistant"
-            assert "syllabus information" in response_data["content"]
-            assert "sources" in response_data
-            assert "metadata" in response_data
-            
-        except NameError:
-            # Skip test if httpx not available
-            pytest.skip("httpx not available for async testing")
+        response = client.post("/chat/", json={
+            "conversation_id": conv_id,
+            "user_id": user_id,
+            "role": "user",
+            "content": message_content
+        })
+        
+        assert response.status_code == 200
+        response_data = response.json()
+        assert response_data["status"] == "success"
+        assert response_data["role"] == "assistant"
+        assert "syllabus information" in response_data["content"]
+        assert "sources" in response_data
+        assert "metadata" in response_data
+
+    app.dependency_overrides = {}
 
 def test_get_chat_history():
     user_id = str(uuid4())
@@ -122,9 +113,14 @@ def test_chat_rate_limiting():
     user_id = str(uuid4())
     message_content = "Test message"
     
+    if get_current_user is None:
+        pytest.fail("Dependency get_current_user not found")
+
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": user_id, "role": "user", "college_id": "test-college-id"}
+
     with patch("main.get_service_client") as mock_get_client, \
-         patch("main.get_current_user") as mock_get_current_user, \
-         patch("app.core.rag.generate_rag_response") as mock_rag_response:
+        patch("main.get_current_user") as mock_get_current_user, \
+        patch("app.core.rag.generate_rag_response", new_callable=AsyncMock) as mock_rag_response:
         
         # Mock authentication
         mock_get_current_user.return_value = {"user_id": user_id, "role": "user"}
@@ -185,3 +181,5 @@ def test_chat_rate_limiting():
             else:
                 assert response.status_code == 429
                 assert "Too many requests" in response.json()["detail"]
+
+    app.dependency_overrides = {}

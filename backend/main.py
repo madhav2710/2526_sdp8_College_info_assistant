@@ -71,6 +71,9 @@ class ChatRequest(BaseModel):
     user_id: UUID
     title: str
 
+class TriggerProcessingRequest(BaseModel):
+    document_id: UUID
+
 # File validation will use configuration values
 def get_file_config():
     """Get file configuration from system config"""
@@ -154,20 +157,23 @@ class ScheduleProcessingRequest(BaseModel):
     document_id: UUID
     scheduled_at: datetime
 
-# <<<<<<< Updated upstream
+
 class AdminCreateRequest(BaseModel):
     name: str
     email: EmailStr
     college_id: str
     password: str
 
+
 class AdminUpdateRequest(BaseModel):
     name: Optional[str] = None
     email: Optional[EmailStr] = None
     college_id: Optional[str] = None
 
+
 class AdminStatusUpdateRequest(BaseModel):
     status: str
+
 
 class CollegeCreateRequest(BaseModel):
     name: str
@@ -177,6 +183,7 @@ class CollegeCreateRequest(BaseModel):
     logo_url: Optional[str] = None
     is_active: Optional[bool] = True
 
+
 class CollegeUpdateRequest(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
@@ -184,10 +191,11 @@ class CollegeUpdateRequest(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     is_active: Optional[bool] = None
-# =======
+
+
 async def _trigger_rag_processing_with_status_tracking(
-    document_id: str, 
-    filename: str, 
+    document_id: str,
+    filename: str,
     approved_by: str
 ):
     """
@@ -197,10 +205,10 @@ async def _trigger_rag_processing_with_status_tracking(
     including detailed logging, error handling, and status updates.
     """
     client = get_service_client()
-    
+
     try:
         logger.info(f"Starting RAG processing for document {document_id} ({filename})")
-        
+
         # Update document status to indicate RAG processing has started
         try:
             client.table("documents").update({
@@ -213,22 +221,22 @@ async def _trigger_rag_processing_with_status_tracking(
                     "start_time": datetime.now(dt.UTC).isoformat()
                 }
             }).eq("id", document_id).execute()
-            
+
             logger.info(f"Document {document_id} status updated to processing")
-            
+
         except Exception as status_error:
             logger.error(f"Failed to update document status to processing: {str(status_error)}")
             # Continue with processing even if status update fails
-        
+
         # Import and trigger RAG processing
         from app.core.rag import trigger_rag_processing
         await trigger_rag_processing(document_id)
-        
+
         logger.info(f"RAG processing completed successfully for document {document_id} ({filename})")
-        
+
     except Exception as e:
         logger.error(f"RAG processing failed for document {document_id} ({filename}): {str(e)}")
-        
+
         # Update document status to failed with error details
         try:
             client.table("documents").update({
@@ -243,12 +251,12 @@ async def _trigger_rag_processing_with_status_tracking(
                     "failed_at": datetime.now(dt.UTC).isoformat()
                 }
             }).eq("id", document_id).execute()
-            
+
             logger.info(f"Document {document_id} status updated to failed")
-            
+
         except Exception as status_error:
             logger.error(f"Failed to update document status to failed: {str(status_error)}")
-        
+
         # Create failure notification
         try:
             # Get document details for notification
@@ -268,9 +276,10 @@ async def _trigger_rag_processing_with_status_tracking(
         except Exception as notification_error:
             logger.warning(f"Failed to create processing failure notification: {str(notification_error)}")
 
+
 @app.post("/admin/trigger-rag-processing")
 async def trigger_manual_rag_processing(
-    document_id: UUID,
+    request: TriggerProcessingRequest,
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user)
 ):
@@ -282,31 +291,32 @@ async def trigger_manual_rag_processing(
     """
     if current_user["role"] != "college_admin":
         raise HTTPException(status_code=403, detail="Not authorized to trigger RAG processing")
-    
+
     target_college_id = current_user["college_id"]
     if not target_college_id:
         raise HTTPException(status_code=400, detail="User is not associated with a college")
-    
+
+    document_id = request.document_id
     try:
         client = get_service_client()
-        
+
         # Verify document exists and belongs to the user's college
         doc_query = client.table("documents").select("*").eq("id", str(document_id)).eq("college_id", target_college_id).execute()
-        
+
         if not doc_query.data:
             raise HTTPException(status_code=404, detail="Document not found or not accessible")
-        
+
         document = doc_query.data[0]
         current_status = document["status"]
         filename = document["filename"]
-        
+
         # Verify document is in a state that allows RAG processing
         if current_status not in ["approved", "failed"]:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Document must be approved or failed to trigger RAG processing. Current status: {current_status}"
             )
-        
+
         # Update document status to processing
         client.table("documents").update({
             "status": "processing",
@@ -318,7 +328,7 @@ async def trigger_manual_rag_processing(
                 "start_time": datetime.now(dt.UTC).isoformat()
             }
         }).eq("id", str(document_id)).execute()
-        
+
         # Log status change
         try:
             log_status_change(
@@ -331,7 +341,7 @@ async def trigger_manual_rag_processing(
             )
         except Exception as log_error:
             logger.warning(f"Failed to log status change: {str(log_error)}")
-        
+
         # Trigger RAG processing
         background_tasks.add_task(
             _trigger_rag_processing_with_status_tracking,
@@ -339,9 +349,9 @@ async def trigger_manual_rag_processing(
             filename,
             current_user["user_id"]
         )
-        
+
         logger.info(f"Manual RAG processing triggered for document {document_id} ({filename}) by user {current_user['user_id']}")
-        
+
         return {
             "status": "success",
             "message": f"RAG processing started for document '{filename}'",
@@ -353,13 +363,12 @@ async def trigger_manual_rag_processing(
                 "triggered_at": datetime.now(dt.UTC).isoformat()
             }
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to trigger manual RAG processing for document {document_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to trigger RAG processing: {str(e)}")
-# >>>>>>> Stashed changes
 
 
 class GuestChatRequest(BaseModel):
@@ -573,11 +582,35 @@ async def login(request: LoginRequest):
             "email": request.email,
             "password": request.password
         })
+
+        # Normalize auth response across supabase-py versions
+        user = getattr(auth_response, "user", None)
+        session = getattr(auth_response, "session", None)
+
+        if not user or not session:
+            response_data = getattr(auth_response, "data", None)
+            if response_data is None and isinstance(auth_response, dict):
+                response_data = auth_response
+
+            if isinstance(response_data, dict):
+                user = response_data.get("user")
+                session = response_data.get("session")
+
+        if not user or not session:
+            logger.error("Login failed: missing user/session in auth response")
+            raise HTTPException(status_code=401, detail="Invalid login credentials")
         
         # Fetch user profile with full details
-        user_id = auth_response.user.id
-        user_email = auth_response.user.email
-        profile_response = supabase.table("profiles").select("role, college_id, full_name").eq("id", user_id).execute()
+        user_id = user.id if hasattr(user, "id") else user.get("id")
+        user_email = user.email if hasattr(user, "email") else user.get("email")
+        access_token = session.access_token if hasattr(session, "access_token") else session.get("access_token")
+
+        if not user_id or not access_token:
+            logger.error("Login failed: incomplete user/session data")
+            raise HTTPException(status_code=401, detail="Invalid login credentials")
+        # Use service role client to bypass RLS for server-side profile lookup
+        profile_client = get_service_client() or supabase
+        profile_response = profile_client.table("profiles").select("role, college_id, full_name").eq("id", user_id).execute()
         
         if not profile_response.data:
             raise HTTPException(status_code=404, detail="User profile not found")
@@ -585,7 +618,7 @@ async def login(request: LoginRequest):
         profile = profile_response.data[0]
         
         return {
-            "access_token": auth_response.session.access_token,
+            "access_token": access_token,
             "token_type": "bearer",
             "user_id": user_id,
             "email": user_email,
@@ -597,10 +630,33 @@ async def login(request: LoginRequest):
         # Preserve explicit HTTPExceptions (e.g. 404 profile not found)
         raise
     except Exception as e:
-        if "Invalid login credentials" in str(e):
+        error_message = str(e)
+
+        if "Invalid login credentials" in error_message:
             raise HTTPException(status_code=401, detail="Invalid login credentials")
-        # For all other unexpected errors, surface a generic message
-        raise HTTPException(status_code=400, detail="Login failed due to a server error. Please try again.")
+
+        if "Email not confirmed" in error_message or "email not confirmed" in error_message:
+            raise HTTPException(status_code=403, detail="Email not confirmed. Please verify your email before logging in.")
+
+        if (
+            "Name or service not known" in error_message
+            or "ConnectError" in error_message
+            or "Server error '521" in error_message
+            or "HTTP/2 521" in error_message
+            or "Status/521" in error_message
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication service unavailable (Supabase 521). Try again later or verify Supabase status."
+            )
+
+        logger.exception("Unexpected login error")
+
+        # Surface a detailed message only in debug mode, otherwise return generic
+        if system_config.application.debug:
+            raise HTTPException(status_code=500, detail=f"Login failed: {error_message}")
+
+        raise HTTPException(status_code=500, detail="Login failed due to a server error. Please try again.")
 
 @app.post("/chat/")
 async def create_chat(message: ChatMessage, current_user: dict = Depends(get_current_user)):
@@ -1196,6 +1252,34 @@ async def get_conversation_messages(
         logger.error(f"Failed to get conversation messages: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get conversation messages: {str(e)}")
 
+
+@app.delete("/chat/conversation/{conversation_id}")
+async def delete_conversation(
+    conversation_id: UUID,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete a conversation and its messages for the current user."""
+    try:
+        user_id = current_user["user_id"]
+        client = get_service_client()
+
+        conv_check = client.table("conversations").select("user_id").eq("id", str(conversation_id)).execute()
+        if not conv_check.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conv_check.data[0]["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this conversation")
+
+        client.table("messages").delete().eq("conversation_id", str(conversation_id)).execute()
+        client.table("conversations").delete().eq("id", str(conversation_id)).execute()
+
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete conversation {conversation_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete conversation")
+
 @app.post("/admin/upload")
 async def upload_document(
     background_tasks: BackgroundTasks,
@@ -1419,9 +1503,9 @@ async def get_query_history(
     try:
         client = get_service_client()
         
-        # Get conversations for this college with recent messages
+        # Get conversations for this college with recent messages including sources
         query = (client.table("conversations")
-                .select("id, title, created_at, messages(content, role, created_at)")
+                .select("id, title, created_at, messages(content, role, created_at, sources)")
                 .eq("college_id", target_college_id)
                 .order("created_at", desc=True)
                 .limit(limit))
@@ -1434,14 +1518,36 @@ async def get_query_history(
             if conv.get("messages"):
                 # Get the first user message as the query
                 user_messages = [msg for msg in conv["messages"] if msg["role"] == "user"]
+                # Get assistant messages to extract sources
+                assistant_messages = [msg for msg in conv["messages"] if msg["role"] == "assistant"]
+                
                 if user_messages:
                     first_message = user_messages[0]
+                    # Collect all unique sources from assistant messages in this conversation
+                    sources = []
+                    for amsg in assistant_messages:
+                        if amsg.get("sources"):
+                            if isinstance(amsg["sources"], list):
+                                sources.extend(amsg["sources"])
+                            elif isinstance(amsg["sources"], str):
+                                try:
+                                    import json
+                                    s_list = json.loads(amsg["sources"])
+                                    if isinstance(s_list, list):
+                                        sources.extend(s_list)
+                                except:
+                                    pass
+                    
+                    # Deduplicate sources
+                    unique_sources = list(set(sources))
+                    
                     query_history.append({
                         "id": conv["id"],
                         "query": first_message["content"][:100] + "..." if len(first_message["content"]) > 100 else first_message["content"],
                         "title": conv["title"],
                         "created_at": conv["created_at"],
-                        "message_count": len(conv["messages"])
+                        "message_count": len(conv["messages"]),
+                        "sources": unique_sources
                     })
         
         return {
@@ -1453,6 +1559,41 @@ async def get_query_history(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to retrieve query history: {str(e)}")
+
+@app.delete("/admin/query-history/{conversation_id}")
+async def delete_admin_query_history(
+    conversation_id: UUID,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["role"] != "college_admin":
+        raise HTTPException(status_code=403, detail="Not authorized to delete query history")
+    
+    target_college_id = current_user["college_id"]
+    if not target_college_id:
+         raise HTTPException(status_code=400, detail="User is not associated with a college")
+
+    try:
+        client = get_service_client()
+        
+        # Verify conversation belongs to the admin's college
+        conv_check = client.table("conversations").select("college_id").eq("id", str(conversation_id)).execute()
+        if not conv_check.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+            
+        if conv_check.data[0]["college_id"] != target_college_id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this conversation")
+
+        # Delete messages first due to foreign key constraint
+        client.table("messages").delete().eq("conversation_id", str(conversation_id)).execute()
+        client.table("conversations").delete().eq("id", str(conversation_id)).execute()
+
+        return {"status": "success", "message": "Query history entry deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete query history entry {conversation_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete query history")
 
 @app.get("/admin/documents")
 async def get_documents(

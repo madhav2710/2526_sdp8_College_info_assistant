@@ -8,11 +8,12 @@ from uuid import uuid4
 
 try:
     from app.core.rag import (
-        process_document, get_rag_config, RAGConfig, 
+        process_document, get_rag_config,
         retrieve_relevant_chunks, _check_vector_storage_integrity,
         _retrieve_chunks_with_native_search, _retrieve_chunks_with_python_search,
         VectorStoreError, EmbeddingServiceError
     )
+    from app.core.config import RAGConfig
 except ImportError:
     process_document = None
     get_rag_config = None
@@ -40,11 +41,10 @@ async def test_process_document_success():
         
         # Mock RAG configuration
         mock_config = RAGConfig(
-            gemini_api_key="test-key",
             chunk_size=1500,
             chunk_overlap=300
         )
-        mock_get_config.return_value = mock_config
+        mock_get_config.return_value = (mock_config, MagicMock())
         
         mock_client = mock_get_client.return_value
         
@@ -100,28 +100,26 @@ async def test_rag_config_validation():
     
     # Test valid configuration
     config = RAGConfig(
-        gemini_api_key="test-key",
         chunk_size=1500,
         chunk_overlap=300,
         similarity_threshold=0.7
     )
     assert config.chunk_size == 1500
     assert config.chunk_overlap == 300
+    assert config.validate() == []
     
     # Test invalid configuration - chunk_overlap >= chunk_size
-    with pytest.raises(Exception):  # Should raise ConfigurationError
-        RAGConfig(
-            gemini_api_key="test-key",
-            chunk_size=300,
-            chunk_overlap=300  # Equal to chunk_size, should fail
-        )
+    invalid_overlap = RAGConfig(
+        chunk_size=300,
+        chunk_overlap=300  # Equal to chunk_size, should fail
+    )
+    assert "RAG_CHUNK_OVERLAP must be less than RAG_CHUNK_SIZE" in "\n".join(invalid_overlap.validate())
     
     # Test invalid similarity threshold
-    with pytest.raises(Exception):  # Should raise ConfigurationError
-        RAGConfig(
-            gemini_api_key="test-key",
-            similarity_threshold=1.5  # > 1.0, should fail
-        )
+    invalid_threshold = RAGConfig(
+        similarity_threshold=1.5  # > 1.0, should fail
+    )
+    assert "RAG_SIMILARITY_THRESHOLD must be between 0.0 and 1.0" in "\n".join(invalid_threshold.validate())
 
 
 @pytest.mark.asyncio
@@ -275,11 +273,10 @@ async def test_enhanced_retrieve_relevant_chunks():
         
         # Mock configuration
         mock_config = RAGConfig(
-            gemini_api_key="test-key",
             max_chunks_per_query=5,
             similarity_threshold=0.7
         )
-        mock_get_config.return_value = mock_config
+        mock_get_config.return_value = (mock_config, MagicMock())
         
         # Mock embedding generation
         mock_embed.return_value = [0.1] * 768
@@ -345,11 +342,10 @@ async def test_configurable_parameters():
         
         # Mock configuration with custom values
         mock_config = RAGConfig(
-            gemini_api_key="test-key",
             max_chunks_per_query=10,
             similarity_threshold=0.8
         )
-        mock_get_config.return_value = mock_config
+        mock_get_config.return_value = (mock_config, MagicMock())
         
         mock_embed.return_value = [0.1] * 768
         mock_integrity.return_value = None
