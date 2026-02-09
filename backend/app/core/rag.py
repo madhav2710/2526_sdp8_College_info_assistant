@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 
 # Configure logging
 logger = logging.getLogger(__name__)
+TARGET_EMBEDDING_DIMENSION = 768
 
 class RAGError(Exception):
     """Base exception for RAG-related errors"""
@@ -371,15 +372,26 @@ def generate_embedding(text: str) -> list[float]:
     
     if not ai_config.gemini_api_key or ai_config.gemini_api_key == "REPLACE_WITH_YOUR_VALID_GEMINI_API_KEY":
         logger.warning("GEMINI_API_KEY not configured or using placeholder - returning zero embedding")
-        return [0.0] * 768  # Return zero embedding as fallback
+        return [0.0] * TARGET_EMBEDDING_DIMENSION  # Return zero embedding as fallback
     
     try:
-        result = genai.embed_content(
-            model=ai_config.embedding_model,
-            content=text,
-            task_type="retrieval_document",
-            title="College Document"
-        )
+        # Prefer requesting 768 dimensions directly to match pgvector schema.
+        try:
+            result = genai.embed_content(
+                model=ai_config.embedding_model,
+                content=text,
+                task_type="retrieval_document",
+                title="College Document",
+                output_dimensionality=TARGET_EMBEDDING_DIMENSION
+            )
+        except TypeError:
+            # Backward compatibility for SDK variants that do not support output_dimensionality.
+            result = genai.embed_content(
+                model=ai_config.embedding_model,
+                content=text,
+                task_type="retrieval_document",
+                title="College Document"
+            )
         
         if not result or 'embedding' not in result:
             raise EmbeddingServiceError("Invalid response from embedding service")
@@ -387,6 +399,21 @@ def generate_embedding(text: str) -> list[float]:
         embedding = result['embedding']
         if not embedding or len(embedding) == 0:
             raise EmbeddingServiceError("Empty embedding returned from service")
+
+        if len(embedding) != TARGET_EMBEDDING_DIMENSION:
+            original_dim = len(embedding)
+            if original_dim > TARGET_EMBEDDING_DIMENSION:
+                embedding = embedding[:TARGET_EMBEDDING_DIMENSION]
+                logger.warning(
+                    f"Embedding dimension {original_dim} does not match target {TARGET_EMBEDDING_DIMENSION}; "
+                    "truncating to fit schema."
+                )
+            else:
+                embedding = embedding + ([0.0] * (TARGET_EMBEDDING_DIMENSION - original_dim))
+                logger.warning(
+                    f"Embedding dimension {original_dim} does not match target {TARGET_EMBEDDING_DIMENSION}; "
+                    "padding with zeros to fit schema."
+                )
         
         logger.debug(f"Generated embedding of dimension {len(embedding)} for text of length {len(text)}")
         return embedding
@@ -452,9 +479,12 @@ async def process_document(document_id: str, file_path: str):
             processing_stats["filename"] = filename
             processing_stats["uploaded_by"] = uploaded_by
             
-            # Only process approved documents
-            if document["status"] != "approved":
-                raise DocumentProcessingError(f"Document {document_id} is not approved for processing. Current status: {document['status']}")
+            # Allow processing to start when document is either approved
+            # or already marked as processing by orchestration endpoints.
+            if document["status"] not in ("approved", "processing"):
+                raise DocumentProcessingError(
+                    f"Document {document_id} is not ready for processing. Current status: {document['status']}"
+                )
 
             logger.info(f"Document details retrieved: {filename} (college: {college_id})")
             processing_stats["stages_completed"].append("document_details_retrieved")
@@ -783,9 +813,12 @@ async def trigger_rag_processing(document_id: str):
         document = doc_res.data[0]
         filename = document.get("filename", "Unknown")
         
-        # Verify document is approved
-        if document["status"] != "approved":
-            raise DocumentProcessingError(f"Document {document_id} ({filename}) is not approved for processing. Current status: {document['status']}")
+        # Verify document is ready to process.
+        # Some flows set status=processing before calling this trigger.
+        if document["status"] not in ("approved", "processing"):
+            raise DocumentProcessingError(
+                f"Document {document_id} ({filename}) is not ready for processing. Current status: {document['status']}"
+            )
         
         if not document.get("storage_path"):
             raise DocumentProcessingError(f"Document {document_id} ({filename}) has no storage path")
@@ -855,7 +888,7 @@ async def _check_vector_storage_integrity(client, college_id: str) -> None:
         ).eq("college_id", college_id).not_.is_("embedding", "null").limit(10).execute()
         
         if chunks_with_embeddings.data:
-            expected_dim = 768  # Google Gemini embedding dimension
+            expected_dim = TARGET_EMBEDDING_DIMENSION
             for chunk in chunks_with_embeddings.data:
                 if chunk.get("embedding") and len(chunk["embedding"]) != expected_dim:
                     raise VectorStoreError(f"Embedding dimension mismatch: expected {expected_dim}, got {len(chunk['embedding'])}")

@@ -331,6 +331,15 @@ BEGIN
                     jsonb_build_object('document_id', NEW.id, 'error_message', NEW.error_message)
                 );
             END IF;
+
+        WHEN 'pending_approval' THEN
+            NULL;
+
+        WHEN 'processing' THEN
+            NULL;
+
+        ELSE
+            NULL;
     END CASE;
     
     RETURN NEW;

@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from app.core.database import get_service_client
+from app.core.database import get_service_client, url as supabase_url, service_key as supabase_service_role_key
 from app.models.notification import (
     Notification,
     NotificationCreate,
@@ -10,7 +10,6 @@ from app.models.notification import (
     NotificationType
 )
 import httpx
-import os
 
 
 class NotificationManager:
@@ -18,8 +17,14 @@ class NotificationManager:
     
     def __init__(self):
         self.client = get_service_client()
-        self.supabase_url = os.getenv("supabase_url")
-        self.service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        self.supabase_url = supabase_url
+        self.service_key = supabase_service_role_key
+
+        if not self.supabase_url or not self.service_key:
+            raise ValueError(
+                "NotificationManager requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+                "from the unified Supabase project."
+            )
     
     async def create_notification(self, notification_data: NotificationCreate) -> Notification:
         """Create a new notification"""

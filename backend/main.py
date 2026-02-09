@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from datetime import datetime
 import datetime as dt
 import time
+import asyncio
 from typing import Optional
 from app.core.database import supabase, get_service_client
 from app.core.auth import get_current_user
@@ -1242,7 +1243,7 @@ async def upload_document(
                     check_url = f"{supabase_url}/storage/v1/object/documents/{storage_path}"
                     check_headers = {"Authorization": f"Bearer {service_key}"}
                     try:
-                        async with httpx.AsyncClient() as http_client:
+                        async with httpx.AsyncClient(trust_env=False) as http_client:
                             check_response = await http_client.head(check_url, headers=check_headers, timeout=10.0)
                             # If file exists in storage, it's a real duplicate
                             if check_response.status_code == 200:
@@ -1267,15 +1268,53 @@ async def upload_document(
         storage_url = f"{SUPABASE_URL}/storage/v1/object/documents/{path}"
         headers = {
             "Authorization": f"Bearer {service_key}",
+            "ApiKey": service_key,
             "Content-Type": file.content_type,
             "x-upsert": "true" 
         }
-        
-        async with httpx.AsyncClient() as http_client:
-            r = await http_client.post(storage_url, content=file_content, headers=headers, timeout=60.0)
-            if r.status_code not in [200, 201]:
-                 raise HTTPException(status_code=400, detail=f"File upload failed: {r.text}")
-            file_id = path  # Store path for cleanup if needed
+
+        max_upload_attempts = 3
+        last_upload_error = None
+        upload_succeeded = False
+
+        for attempt in range(1, max_upload_attempts + 1):
+            try:
+                async with httpx.AsyncClient(trust_env=False) as http_client:
+                    r = await http_client.post(storage_url, content=file_content, headers=headers, timeout=60.0)
+
+                if r.status_code in [200, 201]:
+                    file_id = path  # Store path for cleanup if needed
+                    upload_succeeded = True
+                    break
+
+                retryable_status_codes = {500, 502, 503, 504, 520, 522, 524}
+                if r.status_code in retryable_status_codes and attempt < max_upload_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+
+                raise HTTPException(status_code=400, detail=f"File upload failed: {r.text}")
+
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as upload_error:
+                last_upload_error = upload_error
+                if attempt < max_upload_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+
+            except HTTPException:
+                raise
+
+            except Exception as upload_error:
+                last_upload_error = upload_error
+                if attempt < max_upload_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+
+        if not upload_succeeded:
+            logger.error(f"Storage upload failed after retries for path {path}: {last_upload_error}")
+            raise HTTPException(
+                status_code=502,
+                detail="Could not connect to Supabase Storage. Please retry in a few seconds."
+            )
 
         # Map content_type to expected DB enum/check if needed
         mime_to_type = {
@@ -1315,7 +1354,7 @@ async def upload_document(
             "Prefer": "return=representation"
         }
         
-        async with httpx.AsyncClient() as http_client:
+        async with httpx.AsyncClient(trust_env=False) as http_client:
              r_db = await http_client.post(db_url, json=doc_data, headers=db_headers, timeout=10.0)
              if r_db.status_code not in [200, 201]:
                  raise HTTPException(status_code=500, detail=f"Database error: {r_db.text}")
@@ -1329,7 +1368,7 @@ async def upload_document(
             if file_id:
                 try:
                     delete_url = f"{SUPABASE_URL}/storage/v1/object/documents/{file_id}"
-                    async with httpx.AsyncClient() as http_client:
+                    async with httpx.AsyncClient(trust_env=False) as http_client:
                         await http_client.delete(delete_url, headers=headers, timeout=10.0)
                 except Exception as cleanup_error:
                     print(f"Warning: Failed to cleanup orphaned file: {cleanup_error}")
@@ -1725,12 +1764,34 @@ async def approve_document(
             "Prefer": "return=representation"
         }
         
-        async with httpx.AsyncClient() as http_client:
-            r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=10.0)
-            if r_db.status_code not in [200, 201]:
+        retryable_status_codes = {500, 502, 503, 504, 520, 522, 524}
+        max_attempts = 3
+        r_db = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with httpx.AsyncClient(trust_env=False) as http_client:
+                    r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=20.0)
+
+                if r_db.status_code in [200, 201]:
+                    break
+
+                if r_db.status_code in retryable_status_codes and attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+
                 raise HTTPException(status_code=500, detail=f"Database update error: {r_db.text}")
-            
-            updated_doc = r_db.json()
+
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as db_error:
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+                logger.error(f"Approve document DB connection failed after retries: {db_error}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Could not connect to Supabase while approving document. Please retry."
+                )
+
+        updated_doc = r_db.json() if r_db else []
         
         # Record the approval in document_approvals table
         approval_data = {
@@ -1741,11 +1802,14 @@ async def approve_document(
         }
         
         approval_url = f"{SUPABASE_URL}/rest/v1/document_approvals"
-        async with httpx.AsyncClient() as http_client:
-            r_approval = await http_client.post(approval_url, json=approval_data, headers=db_headers, timeout=10.0)
-            if r_approval.status_code not in [200, 201]:
-                # Log but don't fail the approval if approval record creation fails
-                print(f"Warning: Failed to create approval record: {r_approval.text}")
+        try:
+            async with httpx.AsyncClient(trust_env=False) as http_client:
+                r_approval = await http_client.post(approval_url, json=approval_data, headers=db_headers, timeout=20.0)
+                if r_approval.status_code not in [200, 201]:
+                    # Log but don't fail the approval if approval record creation fails
+                    print(f"Warning: Failed to create approval record: {r_approval.text}")
+        except Exception as approval_record_error:
+            print(f"Warning: Failed to create approval record: {approval_record_error}")
         
         # Log status change
         try:
@@ -1875,12 +1939,34 @@ async def reject_document(
             "Prefer": "return=representation"
         }
         
-        async with httpx.AsyncClient() as http_client:
-            r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=10.0)
-            if r_db.status_code not in [200, 201]:
+        retryable_status_codes = {500, 502, 503, 504, 520, 522, 524}
+        max_attempts = 3
+        r_db = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with httpx.AsyncClient(trust_env=False) as http_client:
+                    r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=20.0)
+
+                if r_db.status_code in [200, 201]:
+                    break
+
+                if r_db.status_code in retryable_status_codes and attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+
                 raise HTTPException(status_code=500, detail=f"Database update error: {r_db.text}")
-            
-            updated_doc = r_db.json()
+
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as db_error:
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+                logger.error(f"Reject document DB connection failed after retries: {db_error}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Could not connect to Supabase while rejecting document. Please retry."
+                )
+
+        updated_doc = r_db.json() if r_db else []
         
         # Record the rejection in document_approvals table
         approval_data = {
@@ -1891,11 +1977,14 @@ async def reject_document(
         }
         
         approval_url = f"{SUPABASE_URL}/rest/v1/document_approvals"
-        async with httpx.AsyncClient() as http_client:
-            r_approval = await http_client.post(approval_url, json=approval_data, headers=db_headers, timeout=10.0)
-            if r_approval.status_code not in [200, 201]:
-                # Log but don't fail the rejection if approval record creation fails
-                print(f"Warning: Failed to create rejection record: {r_approval.text}")
+        try:
+            async with httpx.AsyncClient(trust_env=False) as http_client:
+                r_approval = await http_client.post(approval_url, json=approval_data, headers=db_headers, timeout=20.0)
+                if r_approval.status_code not in [200, 201]:
+                    # Log but don't fail the rejection if approval record creation fails
+                    print(f"Warning: Failed to create rejection record: {r_approval.text}")
+        except Exception as rejection_record_error:
+            print(f"Warning: Failed to create rejection record: {rejection_record_error}")
         
         # Create notification for college admin about document rejection
         try:
@@ -1977,12 +2066,34 @@ async def schedule_document_processing(
             "Prefer": "return=representation"
         }
         
-        async with httpx.AsyncClient() as http_client:
-            r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=10.0)
-            if r_db.status_code not in [200, 201]:
+        retryable_status_codes = {500, 502, 503, 504, 520, 522, 524}
+        max_attempts = 3
+        r_db = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async with httpx.AsyncClient(trust_env=False) as http_client:
+                    r_db = await http_client.patch(db_url, json=update_data, headers=db_headers, timeout=20.0)
+
+                if r_db.status_code in [200, 201]:
+                    break
+
+                if r_db.status_code in retryable_status_codes and attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+
                 raise HTTPException(status_code=500, detail=f"Database update error: {r_db.text}")
-            
-            updated_doc = r_db.json()
+
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as db_error:
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+                    continue
+                logger.error(f"Schedule processing DB connection failed after retries: {db_error}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Could not connect to Supabase while scheduling processing. Please retry."
+                )
+
+        updated_doc = r_db.json() if r_db else []
         
         return {
             "status": "success",

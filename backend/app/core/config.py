@@ -334,12 +334,69 @@ class ConfigurationManager:
             ConfigurationError: If configuration is invalid or missing required values
         """
         try:
+            def resolve_env(primary_name: str, *alias_names: str) -> str:
+                primary_value = (os.getenv(primary_name) or "").strip()
+                alias_values = {
+                    alias_name: (os.getenv(alias_name) or "").strip()
+                    for alias_name in alias_names
+                }
+
+                if primary_value:
+                    for alias_name, alias_value in alias_values.items():
+                        if alias_value and alias_value != primary_value:
+                            raise ConfigValidationError(
+                                f"Conflicting env vars: {primary_name} and {alias_name}. "
+                                "Use one unified Supabase project configuration."
+                            )
+                    return primary_value
+
+                non_empty_aliases = {
+                    alias_name: alias_value
+                    for alias_name, alias_value in alias_values.items()
+                    if alias_value
+                }
+                distinct_values = set(non_empty_aliases.values())
+
+                if len(distinct_values) > 1:
+                    conflict_names = ", ".join(sorted(non_empty_aliases.keys()))
+                    raise ConfigValidationError(
+                        f"Conflicting env aliases for {primary_name}: {conflict_names}. "
+                        "Use one unified Supabase project configuration."
+                    )
+
+                return next(iter(distinct_values), "")
+
+            def ensure_same_project(primary_value: str, secondary_name: str) -> None:
+                secondary_value = (os.getenv(secondary_name) or "").strip()
+                if secondary_value and primary_value and secondary_value != primary_value:
+                    raise ConfigValidationError(
+                        f"{secondary_name} points to a different Supabase project. "
+                        "This backend supports only one unified Supabase project."
+                    )
+
             # Load database configuration
             database_config = DatabaseConfig(
-                supabase_url=os.getenv("SUPABASE_URL", ""),
-                supabase_key=os.getenv("SUPABASE_KEY", ""),
-                supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+                supabase_url=resolve_env("SUPABASE_URL", "supabase_url"),
+                supabase_key=resolve_env("SUPABASE_KEY", "supabase_key"),
+                supabase_service_role_key=resolve_env(
+                    "SUPABASE_SERVICE_ROLE_KEY",
+                    "SERVICE_ROLE_KEY",
+                    "supabase_service_role_key"
+                )
             )
+
+            for legacy_url_var in ("RAG_SUPABASE_URL", "SUPABASE_RAG_URL", "VECTOR_SUPABASE_URL"):
+                ensure_same_project(database_config.supabase_url, legacy_url_var)
+
+            for legacy_key_var in ("RAG_SUPABASE_KEY", "SUPABASE_RAG_KEY", "VECTOR_SUPABASE_KEY"):
+                ensure_same_project(database_config.supabase_key, legacy_key_var)
+
+            for legacy_service_var in (
+                "RAG_SUPABASE_SERVICE_ROLE_KEY",
+                "SUPABASE_RAG_SERVICE_ROLE_KEY",
+                "VECTOR_SUPABASE_SERVICE_ROLE_KEY"
+            ):
+                ensure_same_project(database_config.supabase_service_role_key, legacy_service_var)
             
             # Load AI configuration
             ai_config = AIConfig(
