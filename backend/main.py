@@ -1135,14 +1135,33 @@ async def guest_chat(request: GuestChatRequest):
                 }
             college_id = colleges[0]["id"]
 
-        rag_result = await generate_basic_response(
-            query=request.content,
-            college_id=college_id,
-        )
+        # Try full RAG in guest mode (no history persistence), then gracefully fallback.
+        try:
+            from app.core.rag import generate_rag_response
+
+            rag_result = await generate_rag_response(
+                query=request.content,
+                college_id=college_id,
+                conversation_history=[]
+            )
+        except Exception as rag_error:
+            logger.warning(f"Guest chat RAG failed, falling back to basic response: {str(rag_error)}")
+            rag_result = await generate_basic_response(
+                query=request.content,
+                college_id=college_id,
+            )
+            rag_result["fallback_used"] = True
+            rag_result["fallback_reason"] = f"Guest RAG failed: {str(rag_error)}"
 
         return {
             "content": rag_result.get("response", ""),
             "sources": rag_result.get("sources", []),
+            "metadata": {
+                "fallback_used": rag_result.get("fallback_used", False),
+                "fallback_reason": rag_result.get("fallback_reason"),
+                "chunks_used": rag_result.get("chunks_used", 0),
+                "quality_score": rag_result.get("quality_score")
+            }
         }
     except Exception as e:
         import traceback

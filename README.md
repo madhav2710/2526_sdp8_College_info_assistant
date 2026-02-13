@@ -1,104 +1,184 @@
-🎓 CollegeInfo-Agent: RAG-Based Multi-College Academic Assistant
+# CollegeInfo-Agent
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![React](https://img.shields.io/badge/Frontend-React-%2361DAFB)
-![RAG](https://img.shields.io/badge/Architecture-RAG-green)
-![ChromaDB](https://img.shields.io/badge/DB-ChromaDB-purple)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-teal)
+![React](https://img.shields.io/badge/Frontend-React-%2361DAFB)
+![Supabase](https://img.shields.io/badge/Backend-Supabase-3ECF8E)
+![pgvector](https://img.shields.io/badge/VectorDB-pgvector-blueviolet)
 
-## 📖 Project Overview
+## Overview
 
-**CollegeInfo-Agent** is an intelligent, multi-tenant academic assistant that automates student and faculty queries for multiple colleges.
+CollegeInfo-Agent is a multi-college academic assistant built with a FastAPI backend and React frontends (User, College Admin, Super Admin).
 
-The system uses **Retrieval-Augmented Generation (RAG)** to ingest unstructured institutional data such as:
+It ingests college documents (PDF/DOCX/TXT), processes them into embeddings, and answers questions through RAG.
 
-- 📄 Syllabus PDFs
-- 📢 Placement notices
-- 🗓 Academic calendars
-- 🏫 College overview / brochures
+## Current Architecture (Important Update)
 
-and then answers questions using **LLMs** grounded in a **local ChromaDB vector store** to minimize hallucinations and provide **source-backed answers**.
+- The project no longer uses ChromaDB.
+- Vector storage is now in Supabase Postgres using `pgvector` (`public.document_chunks.embedding VECTOR(768)`).
+- The previous split Supabase setup has been merged into a single unified Supabase project.
+- One Supabase project now handles:
+  - Auth (`auth.users`)
+  - Relational data (`public.*` tables)
+  - Storage bucket (`documents`)
+  - Vector data + similarity search (`pgvector`)
 
-This version introduces a **React frontend**, a **Python backend**, and a **multi-level admin system** with **Super Admin + College Admins**.
+This is enforced in code (`backend/app/core/database.py`) and migrations (`backend/migrations/000_unified_single_project_schema.sql`).
 
----
+## Key Features
 
-## 🌟 Key Features
+- RAG-based Q&A with source snippets.
+- College-scoped retrieval (queries filtered by `college_id`).
+- Native vector retrieval via Supabase RPC `match_documents(...)` with Python fallback similarity search.
+- College admin document upload and query-history view.
+- Super admin approval workflow for documents.
+- Document lifecycle states:
+  - `uploaded -> pending_approval -> approved/rejected -> processing -> completed/failed`
+- Optional processing modes after approval:
+  - `immediate`, `scheduled`, `manual`
+- Notification system for document events:
+  - uploaded, approved, rejected, processed, failed
+- Guest chat endpoint (`/guest-chat`) with graceful fallback when RAG is unavailable.
 
-### 🔍 RAG-Powered Q&A
+## Tech Stack
 
-- Ask questions about syllabus, subjects, placement stats, timelines, rules, etc.
-- Answers are grounded in documents stored in **ChromaDB**.
-- Each answer can include **citations / source snippets**.
+- Backend: FastAPI
+- Database/Auth/Storage: Supabase
+- Vector DB: pgvector on Supabase Postgres
+- AI models: Google Gemini (embeddings + generation)
+- PDF extraction: `pypdf`
+- Frontend: React + Vite + Tailwind (three separate apps)
 
-### 🏫 Multi-College Support
+## Repository Layout
 
-- Each college has its **own isolated knowledge base**.
-- College-level configuration and branding (name, logo, basic info).
+```text
+backend/
+  main.py
+  app/core/
+  migrations/
+  run_migration.py
+  tests/
 
-### 👤 College Admin Panel
+frontend/
+  User/
+  Admin/
+  Super admin/
+```
 
-- One **Admin per college**.
-- Admin can:
-  - Upload documents (syllabus, placement PDFs, notices, college overview, etc.).
-  - Trigger ingestion of files into ChromaDB for that specific college.
-  - View and manage uploaded documents.
-  - Optionally monitor query history for their college.
+## Database Schema (Unified Supabase Project)
 
-### 🛡 Super Admin Panel
+Primary tables created in `backend/migrations/000_unified_single_project_schema.sql`:
 
-- **Super Admin** oversees the whole platform.
-- Super Admin can:
-  - Create / Read / Update / Delete (**CRUD**) college admins.
-  - Associate admins with specific colleges.
-  - Disable/enable admins.
-  - View high-level system stats (number of colleges, documents, queries).
+- `public.colleges`
+- `public.profiles`
+- `public.users` (compatibility table)
+- `public.admins` (compatibility table)
+- `public.documents`
+- `public.document_chunks` (with `VECTOR(768)`)
+- `public.conversations`
+- `public.messages`
+- `public.notifications`
+- `public.document_approvals`
+- `public.document_status_history`
 
-### 💻 Modern React Frontend
+Also includes:
 
-- Separate **React** frontend application.
-- Role-based views:
-  - 🎓 Student/Faculty: Ask questions via chat-like UI.
-  - 👤 College Admin: Document upload & ingestion dashboard.
-  - 🛡 Super Admin: Admin management dashboard.
+- `CREATE EXTENSION IF NOT EXISTS vector`
+- HNSW/auxiliary indexes for vector search
+- RPC functions such as `public.match_documents(...)`
+- RLS policies for multi-tenant access control
 
-### 🧠 Backend Intelligence (Python)
+## Local Setup
 
-- Python backend (e.g. **FastAPI**) handles:
-  - File uploads.
-  - PDF text extraction.
-  - Chunking & embedding.
-  - Storage & retrieval from **ChromaDB**.
-  - Orchestrating calls to **LLMs** (OpenAI / Google Gemini / others via LangChain).
+### 1) Backend configuration
 
----
+```bash
+cp backend/.env.example backend/.env
+```
 
-## 🛠️ Technology Stack
+Fill required values in `backend/.env`:
 
-| Component        | Technology                          | Role                                 |
-| :--------------- | :---------------------------------- | :----------------------------------- |
-| Language         | Python 3.10+                        | Backend logic                        |
-| Backend          | FastAPI (or Flask)                  | REST API for frontend & ingestion    |
-| Frontend         | React (Vite/CRA)                    | Web UI (Students, Admin, SuperAdmin) |
-| RAG Orchestrator | LangChain / langgraph (optional)    | RAG pipeline                         |
-| Vector DB        | ChromaDB (service / local)          | Document embeddings & retrieval      |
-| LLM              | OpenAI / Google Gemini / compatible | Answer generation                    |
-| ETL              | PyPDF / pdfplumber                  | PDF text extraction                  |
-| Config           | python-dotenv                       | Secrets & env vars                   |
-| Auth (optional)  | JWT / OAuth2                        | Role-based authentication            |
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `JWT_SECRET_KEY`
+- `GEMINI_API_KEY` (required for full RAG responses)
 
----
+Single-project note:
 
-### 💬 Student Q&A Flow
+- Do not point any `RAG_SUPABASE_*`, `SUPABASE_RAG_*`, or `VECTOR_SUPABASE_*` vars to a different project.
 
-1. Student selects their college.
-2. Asks a question: _“What is the 5th semester syllabus for IT?”_
-3. Backend:
-   - Filters ChromaDB documents by `college_id`.
-   - Retrieves top-k relevant chunks.
-   - Builds a context prompt.
-   - Calls LLM (OpenAI / Gemini) via LangChain.
-   - Returns answer + optionally sources.
-4. Frontend displays:
-   - AI answer in chat bubble.
-   - “Sources” section with document titles / snippets.
+### 2) Run DB migrations
+
+From `backend/`:
+
+```bash
+python run_migration.py --plan current-all
+```
+
+### 3) Start backend
+
+From `backend/`:
+
+```bash
+uvicorn main:app --reload --port 8000
+```
+
+### 4) Start frontends
+
+Each frontend reads `VITE_API_BASE_URL` (see each `.env.example`).
+
+User app:
+
+```bash
+cd frontend/User
+npm install
+npm run dev
+```
+
+Admin app (configured for port `5174`):
+
+```bash
+cd frontend/Admin
+npm install
+npm run dev
+```
+
+Super Admin app (default Vite port; use a different port if needed):
+
+```bash
+cd "frontend/Super admin"
+npm install
+npm run dev -- --port 5175
+```
+
+## API Surface (High Level)
+
+- Auth: `/auth/signup`, `/auth/login`
+- User chat/history: `/chat/`, `/chat/history/`, `/chat/conversation/{id}/messages`
+- Guest chat: `/guest-chat`
+- College admin: `/admin/upload`, `/admin/documents`, `/admin/query-history`, `/admin/trigger-rag-processing`
+- Super admin approvals/workflow:
+  - `/super-admin/pending-documents`
+  - `/super-admin/approve-document`
+  - `/super-admin/reject-document`
+  - `/super-admin/schedule-document-processing`
+  - `/super-admin/trigger-processing`
+- Super admin management:
+  - `/superadmin/stats`
+  - `/superadmin/colleges*`
+  - `/superadmin/admins*`
+  - `/superadmin/documents`
+- Notifications:
+  - `/notifications`
+  - `/notifications/{notification_id}/read`
+  - `/notifications/{notification_id}`
+  - `/notifications/unread-count`
+
+## Tests
+
+From `backend/`:
+
+```bash
+pytest
+```
