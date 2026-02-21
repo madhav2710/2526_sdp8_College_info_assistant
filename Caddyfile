@@ -1,0 +1,42 @@
+{
+	auto_https off
+}
+
+:80 {
+	encode gzip zstd
+	log {
+		output stdout
+		format console
+	}
+
+	@apiRoot path /api
+	redir @apiRoot /api/ 301
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	@adminRoot path /admin
+	redir @adminRoot /admin/ 301
+	handle_path /admin/* {
+		root * /var/www/admin
+		try_files {path} /index.html
+		file_server
+	}
+
+	@superRoot path /super
+	redir @superRoot /super/ 301
+	handle_path /super/* {
+		root * /var/www/super
+		try_files {path} /index.html
+		file_server
+	}
+
+	@immutable expression {path}.matches("(?i)\\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$")
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	handle {
+		root * /var/www/user
+		try_files {path} /index.html
+		file_server
+	}
+}

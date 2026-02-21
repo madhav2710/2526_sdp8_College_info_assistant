@@ -1,0 +1,82 @@
+from fastapi import APIRouter
+
+from app import legacy_main as legacy
+
+router = APIRouter()
+router.add_api_route(
+    "/super-admin/approve-document",
+    legacy.approve_document,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/super-admin/reject-document",
+    legacy.reject_document,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/super-admin/schedule-document-processing",
+    legacy.schedule_document_processing,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/super-admin/trigger-processing",
+    legacy.trigger_processing,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/super-admin/pending-documents",
+    legacy.get_pending_documents,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/super-admin/scheduled-documents",
+    legacy.get_scheduled_documents,
+    methods=["GET"],
+)
+router.add_api_route("/superadmin/stats", legacy.get_superadmin_stats, methods=["GET"])
+router.add_api_route(
+    "/superadmin/colleges",
+    legacy.get_superadmin_colleges,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/superadmin/colleges",
+    legacy.create_superadmin_college,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/superadmin/colleges/{college_id}",
+    legacy.update_superadmin_college,
+    methods=["PUT"],
+)
+router.add_api_route(
+    "/superadmin/colleges/{college_id}",
+    legacy.delete_superadmin_college,
+    methods=["DELETE"],
+)
+router.add_api_route("/superadmin/admins", legacy.get_superadmin_admins, methods=["GET"])
+router.add_api_route(
+    "/superadmin/admins",
+    legacy.create_superadmin_admin,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/superadmin/admins/{admin_id}",
+    legacy.update_superadmin_admin,
+    methods=["PUT"],
+)
+router.add_api_route(
+    "/superadmin/admins/{admin_id}",
+    legacy.delete_superadmin_admin,
+    methods=["DELETE"],
+)
+router.add_api_route(
+    "/superadmin/admins/{admin_id}/toggle-status",
+    legacy.toggle_superadmin_admin_status,
+    methods=["PATCH"],
+)
+router.add_api_route(
+    "/superadmin/documents",
+    legacy.get_superadmin_documents,
+    methods=["GET"],
+)

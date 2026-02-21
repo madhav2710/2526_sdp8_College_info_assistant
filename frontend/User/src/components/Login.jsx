@@ -1,196 +1,175 @@
-import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { LogIn, UserPlus, Mail, Lock, User, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
+import React, { useState } from "react";
+import {
+  AlertCircle,
+  CheckCircle,
+  Lock,
+  LogIn,
+  Mail,
+  User,
+  UserPlus,
+} from "lucide-react";
+
+import { useAuth } from "../context/AuthContext";
 
 const Login = ({ onSuccess }) => {
-    const [mode, setMode] = useState('login');
-    const [fullName, setFullName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-    const [successMessage, setSuccessMessage] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const { login, signup } = useAuth();
+  const [mode, setMode] = useState("login");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const { login, signup } = useAuth();
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
-        setSuccessMessage('');
-        setIsLoading(true);
-        
-        try {
-            if (mode === 'login') {
-                await login(email, password);
-                if (onSuccess) onSuccess();
-            } else {
-                await signup(email, password, fullName, null);
-                setSuccessMessage('Account created! Please check your email to confirm your account before logging in.');
-                setFullName('');
-                setEmail('');
-                setPassword('');
-                setTimeout(() => {
-                    setMode('login');
-                    setSuccessMessage('');
-                }, 5000);
-            }
-        } catch (err) {
-            setError(err.message || 'Something went wrong, please try again.');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setSuccessMessage("");
+    setIsLoading(true);
 
-    return (
-        <div className="w-full">
-            {/* Header */}
-            <div className="text-center mb-6">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mb-4 shadow-lg">
-                    {mode === 'login' ? (
-                        <LogIn className="w-8 h-8 text-white" />
-                    ) : (
-                        <UserPlus className="w-8 h-8 text-white" />
-                    )}
-                </div>
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-                    {mode === 'login' ? 'Welcome Back' : 'Create Account'}
-                </h2>
-                <p className="text-sm text-slate-600">
-                    {mode === 'login'
-                        ? 'Sign in to sync your chat history across devices'
-                        : 'Sign up to save your conversations and access them later'}
-                </p>
-            </div>
+    try {
+      if (mode === "login") {
+        await login(email, password);
+        if (onSuccess) onSuccess();
+      } else {
+        await signup(email, password, fullName, null);
+        setSuccessMessage(
+          "Account created. Please confirm your email before logging in.",
+        );
+        setFullName("");
+        setEmail("");
+        setPassword("");
+        setTimeout(() => {
+          setMode("login");
+          setSuccessMessage("");
+        }, 5000);
+      }
+    } catch (err) {
+      setError(err.message || "Something went wrong, please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-            {/* Error Message */}
-            {error && (
-                <div className="mb-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 animate-in fade-in">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                    <span>{error}</span>
-                </div>
-            )}
-
-            {/* Success Message */}
-            {successMessage && (
-                <div className="mb-4 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700 animate-in fade-in">
-                    <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                    <span>{successMessage}</span>
-                </div>
-            )}
-
-            {/* Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-                {mode === 'signup' && (
-                    <div className="space-y-2">
-                        <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                            <User className="w-4 h-4 text-slate-500" />
-                            Full name (optional)
-                        </label>
-                        <input
-                            type="text"
-                            className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-slate-400"
-                            placeholder="John Doe"
-                            value={fullName}
-                            onChange={(e) => setFullName(e.target.value)}
-                        />
-                    </div>
-                )}
-                
-                <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                        <Mail className="w-4 h-4 text-slate-500" />
-                        Email
-                    </label>
-                    <input
-                        type="email"
-                        required
-                        className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-slate-400"
-                        placeholder="you@example.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                    />
-                </div>
-                
-                <div className="space-y-2">
-                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                        <Lock className="w-4 h-4 text-slate-500" />
-                        Password
-                    </label>
-                    <input
-                        type="password"
-                        required
-                        className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all placeholder:text-slate-400"
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                    />
-                </div>
-                
-                <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                >
-                    {isLoading ? (
-                        <>
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                            <span>Processing...</span>
-                        </>
-                    ) : (
-                        <>
-                            {mode === 'login' ? (
-                                <>
-                                    <LogIn className="w-4 h-4" />
-                                    <span>Sign In</span>
-                                </>
-                            ) : (
-                                <>
-                                    <UserPlus className="w-4 h-4" />
-                                    <span>Sign Up</span>
-                                </>
-                            )}
-                        </>
-                    )}
-                </button>
-            </form>
-
-            {/* Toggle Mode */}
-            <div className="mt-6 pt-6 border-t border-slate-200 text-center">
-                <p className="text-sm text-slate-600">
-                    {mode === 'login' ? (
-                        <>
-                            Don&apos;t have an account?{' '}
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setMode('signup');
-                                    setError('');
-                                    setSuccessMessage('');
-                                }}
-                                className="font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
-                            >
-                                Sign up
-                            </button>
-                        </>
-                    ) : (
-                        <>
-                            Already have an account?{' '}
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setMode('login');
-                                    setError('');
-                                    setSuccessMessage('');
-                                }}
-                                className="font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
-                            >
-                                Log in
-                            </button>
-                        </>
-                    )}
-                </p>
-            </div>
+  return (
+    <div className="w-full">
+      <div className="mb-6 text-center">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[12px] border border-[var(--border-soft)] bg-[var(--bg-subtle)] text-[var(--accent)]">
+          {mode === "login" ? <LogIn className="h-6 w-6" /> : <UserPlus className="h-6 w-6" />}
         </div>
-    );
+        <h2 className="type-h3">{mode === "login" ? "Welcome back" : "Create account"}</h2>
+        <p className="mt-2 type-small text-[var(--text-secondary)]">
+          {mode === "login"
+            ? "Sign in to keep your conversation history."
+            : "Create an account to save and revisit your chats."}
+        </p>
+      </div>
+
+      {error && (
+        <div className="mb-4 flex items-center gap-2 rounded-[12px] border border-[#d9b4b4] bg-[#f8ecec] p-3 text-sm text-[var(--danger)]">
+          <AlertCircle className="h-4 w-4" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="mb-4 flex items-start gap-2 rounded-[12px] border border-[#bdd6c5] bg-[#edf7f1] p-3 text-sm text-[var(--success)]">
+          <CheckCircle className="mt-0.5 h-4 w-4" />
+          <span>{successMessage}</span>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {mode === "signup" && (
+          <label className="block space-y-1.5">
+            <span className="type-small flex items-center gap-1.5 text-[var(--text-secondary)]">
+              <User className="h-4 w-4" />
+              Full Name (optional)
+            </span>
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Jane Doe"
+              className="w-full rounded-[12px] border border-[var(--border-soft)] bg-[var(--bg-surface)] px-3 py-2.5 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+            />
+          </label>
+        )}
+
+        <label className="block space-y-1.5">
+          <span className="type-small flex items-center gap-1.5 text-[var(--text-secondary)]">
+            <Mail className="h-4 w-4" />
+            Email
+          </span>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="w-full rounded-[12px] border border-[var(--border-soft)] bg-[var(--bg-surface)] px-3 py-2.5 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+          />
+        </label>
+
+        <label className="block space-y-1.5">
+          <span className="type-small flex items-center gap-1.5 text-[var(--text-secondary)]">
+            <Lock className="h-4 w-4" />
+            Password
+          </span>
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="w-full rounded-[12px] border border-[var(--border-soft)] bg-[var(--bg-surface)] px-3 py-2.5 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+          />
+        </label>
+
+        <button type="submit" disabled={isLoading} className="btn-primary w-full px-5">
+          {isLoading
+            ? "Processing..."
+            : mode === "login"
+              ? "Sign In"
+              : "Create Account"}
+        </button>
+      </form>
+
+      <div className="mt-6 border-t border-[var(--border-soft)] pt-4 text-center type-small text-[var(--text-secondary)]">
+        {mode === "login" ? (
+          <>
+            Need an account?{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setMode("signup");
+                setError("");
+                setSuccessMessage("");
+              }}
+              className="font-semibold text-[var(--accent)] underline"
+            >
+              Sign up
+            </button>
+          </>
+        ) : (
+          <>
+            Already registered?{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setMode("login");
+                setError("");
+                setSuccessMessage("");
+              }}
+              className="font-semibold text-[var(--accent)] underline"
+            >
+              Log in
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default Login;

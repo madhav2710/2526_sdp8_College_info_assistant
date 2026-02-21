@@ -152,6 +152,52 @@ npm install
 npm run dev -- --port 5175
 ```
 
+## Docker (Single-Container Runtime)
+
+This repository includes a single-image Docker deployment that runs:
+- Caddy on port `80` (static frontends + `/api` reverse proxy)
+- FastAPI/Uvicorn on internal port `8000`
+
+### 1) Prepare backend env
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Fill the required backend values in `backend/.env` (`SUPABASE_*`, `GEMINI_API_KEY`, etc.).
+
+### 2) Build and run
+
+From project root:
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+### 3) Smoke checks
+
+```bash
+curl http://localhost/api/
+curl http://localhost/api/public/colleges
+```
+
+Open:
+- `http://localhost/` (User)
+- `http://localhost/admin/` (Admin)
+- `http://localhost/super/` (Super Admin)
+
+Deep links should also work:
+- `http://localhost/admin/dashboard`
+- `http://localhost/super/colleges`
+
+### 4) Logs and shutdown
+
+```bash
+docker compose logs -f
+docker compose down
+```
+
 ## API Surface (High Level)
 
 - Auth: `/auth/signup`, `/auth/login`
