@@ -27,7 +27,20 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
     return saved || null;
   });
 
-  const conversationIdRef = useRef(conversationId || window.crypto.randomUUID());
+  // UUID generation fallback for non-secure contexts (HTTP)
+  const generateUUID = () => {
+    if (typeof window !== "undefined" && window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID();
+    }
+    return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+      (
+        c ^
+        (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
+      ).toString(16)
+    );
+  };
+
+  const conversationIdRef = useRef(conversationId || generateUUID());
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -46,7 +59,7 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
       conversationIdRef.current = conversationId;
       loadConversation(conversationId);
     } else {
-      conversationIdRef.current = window.crypto.randomUUID();
+      conversationIdRef.current = generateUUID();
       setMessages([]);
     }
   }, [conversationId]);
@@ -192,19 +205,19 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
 
     const cfg = isRAGResponse && !fallbackUsed
       ? {
-          icon: <CheckCircle className="h-3.5 w-3.5" />,
-          text: "Document-based response",
-          color: "text-[var(--success)]",
-          border: "border-[var(--border-soft)]",
-          bg: "bg-[var(--bg-subtle)]",
-        }
+        icon: <CheckCircle className="h-3.5 w-3.5" />,
+        text: "Document-based response",
+        color: "text-[var(--success)]",
+        border: "border-[var(--border-soft)]",
+        bg: "bg-[var(--bg-subtle)]",
+      }
       : {
-          icon: <AlertCircle className="h-3.5 w-3.5" />,
-          text: "Basic response",
-          color: "text-[var(--warning)]",
-          border: "border-[var(--border-soft)]",
-          bg: "bg-[var(--bg-subtle)]",
-        };
+        icon: <AlertCircle className="h-3.5 w-3.5" />,
+        text: "Basic response",
+        color: "text-[var(--warning)]",
+        border: "border-[var(--border-soft)]",
+        bg: "bg-[var(--bg-subtle)]",
+      };
 
     return (
       <div
@@ -310,13 +323,12 @@ const ChatInterface = ({ conversationId, onConversationChange }) => {
 
               <div className={`flex max-w-[86%] flex-col gap-2 ${msg.role === "user" ? "items-end" : "items-start"}`}>
                 <div
-                  className={`rounded-[16px] px-4 py-3 shadow-[0_1px_2px_rgba(31,31,28,0.06)] ${
-                    msg.role === "user"
+                  className={`rounded-[16px] px-4 py-3 shadow-[0_1px_2px_rgba(31,31,28,0.06)] ${msg.role === "user"
                       ? "border border-[var(--accent)] bg-[var(--accent)] text-[#f8f8f6]"
                       : msg.isError
                         ? "border border-[#d9b4b4] bg-[#f8ecec] text-[var(--danger)]"
                         : "border border-[var(--border-soft)] bg-[var(--bg-surface)] text-[var(--text-primary)]"
-                  }`}
+                    }`}
                 >
                   {msg.role === "assistant" && !msg.isError ? (
                     <MarkdownRenderer content={msg.content} className="text-[16px]" />

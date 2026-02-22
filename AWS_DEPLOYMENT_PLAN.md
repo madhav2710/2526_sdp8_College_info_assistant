@@ -109,12 +109,10 @@ Reason: lower cost, better caching, simpler release rollback than container-host
 - Replace hardcoded localhost links in `frontend/User/src/App.jsx` with environment-driven URLs.
 - Build each frontend per environment.
 
-3. AWS infra
-- Create ECR repo.
-- Create ECS cluster/service/task definition for backend.
-- Create ALB and target group health check on `/healthz`.
-- Create 3 S3 buckets + 3 CloudFront distributions.
-- Configure Route53 + ACM certs.
+3. AWS infra (using AWS Copilot)
+- Run `copilot init` to bootstrap environment, ECS cluster, service, and Load Balancer.
+- Use `copilot secret init` for backend secrets instead of manual console work.
+- Use Copilot's `Static Site` pattern to spin up the 3 frontends' S3 buckets + CloudFront automatically.
 
 4. Release
 - Deploy backend image.
@@ -260,8 +258,8 @@ Move these backend vars to Secrets Manager/SSM:
 - [ ] Add `/healthz` in `backend/main.py`.
 - [ ] Replace localhost dashboard links in `frontend/User/src/App.jsx`.
 - [ ] Restrict CORS in `backend/main.py`.
-- [ ] Add infra code folder (Terraform or CloudFormation) for ECS + S3 + CloudFront.
-- [ ] Add CI workflows for backend and each frontend.
+- [ ] Run `copilot init` to bootstrap backend API and 3 static frontends (creates `copilot/` directory).
+- [ ] Add CI workflows for backend and each frontend (Copilot can automatically generate this via `copilot pipeline`).
 - [ ] Introduce SQS-based worker for processing jobs.
 - [ ] Implement scheduled-job execution path (EventBridge/Scheduler).
 
