@@ -29,3 +29,15 @@ Thumbs.db
 backend/CHECKPOINT_VERIFICATION.md
 RAG_IMPROVEMENTS_GUIDE.md
 /backend/.venv
+backend/_env1
+/overleaf
+SRS_IEEE_830_CURRENT_STATE.md
+SRS_CURRENT_STATE.md
+SRS.md
+frontend/USER_EDITORIAL_MINIMAL_DESIGN.md
+frontend/ADMIN_SUPERADMIN_SWISS_CONSOLE_DESIGN.md
+AWS_ECS_DEPLOYMENT_GUIDE.md
+seed_credentials.md
+AWS_DEPLOYMENT_PLAN.md
+copilot-help.txt
+copilot/.workspace

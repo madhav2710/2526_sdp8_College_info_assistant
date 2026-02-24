@@ -1,0 +1,23 @@
+.git
+.gitignore
+*.md
+overleaf/
+Learning/
+backend/.venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/app/__pycache__/
+backend/app/core/__pycache__/
+backend/app/models/__pycache__/
+backend/.env
+backend/_env
+backend/_env1
+frontend/Admin/node_modules/
+frontend/Admin/dist/
+frontend/User/node_modules/
+frontend/User/dist/
+frontend/Super admin/node_modules/
+frontend/Super admin/dist/
+.pytest_cache/
+DEV_NOTES.ipynb
+*.pyc

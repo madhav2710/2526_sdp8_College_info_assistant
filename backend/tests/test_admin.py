@@ -108,7 +108,7 @@ def test_get_documents_with_statistics():
     app.dependency_overrides[get_current_user] = mock_admin_user
 
     # Mock the httpx client and service client
-    with patch("main.get_service_client") as mock_get_service_client:
+    with patch("app.legacy_main.get_service_client") as mock_get_service_client:
         mock_client = MagicMock()
         mock_get_service_client.return_value = mock_client
         
@@ -176,7 +176,7 @@ def test_get_query_history():
 
     app.dependency_overrides[get_current_user] = mock_admin_user
 
-    with patch("main.get_service_client") as mock_get_service_client:
+    with patch("app.legacy_main.get_service_client") as mock_get_service_client:
         mock_client = MagicMock()
         mock_get_service_client.return_value = mock_client
         
@@ -247,7 +247,7 @@ def test_get_pending_documents_success():
 
     app.dependency_overrides[get_current_user] = mock_super_admin_user
 
-    with patch("main.get_service_client") as mock_get_service_client:
+    with patch("app.legacy_main.get_service_client") as mock_get_service_client:
         mock_client = MagicMock()
         mock_get_service_client.return_value = mock_client
         
@@ -306,7 +306,7 @@ def test_approve_document_success():
 
     app.dependency_overrides[get_current_user] = mock_super_admin_user
 
-    with patch("main.get_service_client") as mock_get_service_client:
+    with patch("app.legacy_main.get_service_client") as mock_get_service_client:
         mock_client = MagicMock()
         mock_get_service_client.return_value = mock_client
         
@@ -354,7 +354,7 @@ def test_approve_document_success():
             mock_http_client.post = async_post
 
             # Mock background task processing
-            with patch("main.BackgroundTasks.add_task") as mock_add_task:
+            with patch("app.legacy_main.BackgroundTasks.add_task") as mock_add_task:
                 response = client.post(
                     "/super-admin/approve-document",
                     json={
@@ -381,7 +381,7 @@ def test_reject_document_success():
 
     app.dependency_overrides[get_current_user] = mock_super_admin_user
 
-    with patch("main.get_service_client") as mock_get_service_client:
+    with patch("app.legacy_main.get_service_client") as mock_get_service_client:
         mock_client = MagicMock()
         mock_get_service_client.return_value = mock_client
         

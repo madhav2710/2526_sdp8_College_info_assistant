@@ -34,8 +34,8 @@ def test_create_chat_message():
     user_id = str(uuid4())
     message_content = "Hello, I need the syllabus."
     
-    with patch("main.get_service_client") as mock_get_client, \
-         patch("main.get_current_user") as mock_get_current_user, \
+    with patch("app.legacy_main.get_service_client") as mock_get_client, \
+         patch("app.legacy_main.get_current_user") as mock_get_current_user, \
          patch("app.core.rag.generate_rag_response") as mock_rag_response:
         
         # Mock authentication
@@ -103,7 +103,7 @@ def test_create_chat_message():
 def test_get_chat_history():
     user_id = str(uuid4())
     
-    with patch("main.supabase.table") as mock_table:
+    with patch("app.legacy_main.supabase.table") as mock_table:
         # Create a mock execution result
         mock_exe = MagicMock()
         mock_exe.data = [{"id": "conv-1", "title": "First Chat"}]
@@ -122,8 +122,8 @@ def test_chat_rate_limiting():
     user_id = str(uuid4())
     message_content = "Test message"
     
-    with patch("main.get_service_client") as mock_get_client, \
-         patch("main.get_current_user") as mock_get_current_user, \
+    with patch("app.legacy_main.get_service_client") as mock_get_client, \
+         patch("app.legacy_main.get_current_user") as mock_get_current_user, \
          patch("app.core.rag.generate_rag_response") as mock_rag_response:
         
         # Mock authentication
