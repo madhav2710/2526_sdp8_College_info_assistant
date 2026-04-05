@@ -1,476 +1,438 @@
-import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-from fastapi.testclient import TestClient
-from main import app
-import pytest
-from unittest.mock import MagicMock, patch
+import sys
+import types
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-# We'll try to import the dependency.
-try:
-    from app.core.auth import get_current_user
-except ImportError:
-    get_current_user = None
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-key")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
+os.environ.setdefault("SERVICE_ROLE_KEY", "test-service-key")
+
+supabase_module = types.ModuleType("supabase")
+google_module = types.ModuleType("google")
+google_generativeai_module = types.ModuleType("google.generativeai")
+setattr(google_generativeai_module, "configure", lambda **kwargs: None)
+setattr(google_module, "generativeai", google_generativeai_module)
+
+
+class _Client:
+    def __init__(self):
+        self.auth = types.SimpleNamespace(admin=types.SimpleNamespace())
+
+    def table(self, *args, **kwargs):
+        return self
+
+    def select(self, *args, **kwargs):
+        return self
+
+    def eq(self, *args, **kwargs):
+        return self
+
+    def in_(self, *args, **kwargs):
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
+    def update(self, *args, **kwargs):
+        return self
+
+    def rpc(self, *args, **kwargs):
+        return self
+
+    def execute(self):
+        return types.SimpleNamespace(data=[])
+
+
+setattr(supabase_module, "Client", _Client)
+setattr(supabase_module, "create_client", lambda *args, **kwargs: _Client())
+sys.modules.setdefault("supabase", supabase_module)
+sys.modules.setdefault("google", google_module)
+sys.modules.setdefault("google.generativeai", google_generativeai_module)
+
+from app.core.auth import get_current_user
+from app.routers.admin import router
+
+app = FastAPI()
+app.include_router(router)
 client = TestClient(app)
 
-# Mock users
-def mock_admin_user():
+
+async def mock_college_admin_user():
     return {
         "user_id": "admin-user-id",
         "role": "college_admin",
-        "college_id": "test-college-id"
+        "college_id": "college-1",
     }
 
-def mock_student_user():
+
+async def mock_student_user():
     return {
         "user_id": "student-user-id",
         "role": "student",
-        "college_id": "test-college-id"
+        "college_id": "college-1",
     }
 
-def mock_super_admin_user():
-    return {
-        "user_id": "super-admin-user-id",
-        "role": "super_admin",
-        "college_id": None
-    }
-
-def test_upload_document_success():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
-    college_id = "test-college-id"
-    filename = "syllabus.pdf"
-
-    app.dependency_overrides[get_current_user] = mock_admin_user
-
-    # Mock the httpx client for storage and database operations
-    with patch("httpx.AsyncClient") as mock_httpx:
-        mock_client = MagicMock()
-        mock_httpx.return_value.__aenter__.return_value = mock_client
-        mock_httpx.return_value.__aexit__.return_value = None
-        
-        # Mock storage upload response
-        mock_storage_response = MagicMock()
-        mock_storage_response.status_code = 201
-        
-        # Mock database insert response
-        mock_db_response = MagicMock()
-        mock_db_response.status_code = 201
-        mock_db_response.json.return_value = [{
-            "id": "doc-123",
-            "filename": filename,
-            "file_type": "pdf",
-            "file_size": 16,  # Length of "fake pdf content"
-            "status": "pending_approval",  # Updated to match new workflow
-            "created_at": "2024-01-04T10:00:00Z"
-        }]
-        
-        # Configure mock to return different responses for different calls
-        def mock_post_side_effect(url, **kwargs):
-            if "storage" in url:
-                return mock_storage_response
-            else:  # database call
-                return mock_db_response
-        
-        # Make the post method async
-        async def async_post(*args, **kwargs):
-            return mock_post_side_effect(*args, **kwargs)
-        
-        mock_client.post = async_post
-
-        files = {"file": (filename, b"fake pdf content", "application/pdf")}
-        response = client.post(
-            "/admin/upload",
-            files=files,
-            data={"college_id": college_id}
-        )
-
-        assert response.status_code == 200
-        response_data = response.json()
-        assert response_data["status"] == "success"
-        assert response_data["message"] == "Document uploaded successfully. Awaiting super admin approval."
-        assert "document" in response_data
-        assert response_data["document"]["id"] == "doc-123"
-        assert response_data["document"]["filename"] == filename
-        assert response_data["document"]["status"] == "pending_approval"  # Updated to match new workflow
-        assert response_data["document"]["file_size"] == 16
-
-    app.dependency_overrides = {}
-
-def test_get_documents_with_statistics():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
-    app.dependency_overrides[get_current_user] = mock_admin_user
-
-    # Mock the httpx client and service client
-    with patch("main.get_service_client") as mock_get_service_client:
-        mock_client = MagicMock()
-        mock_get_service_client.return_value = mock_client
-        
-        # Mock documents query
-        mock_docs_response = MagicMock()
-        mock_docs_response.data = [
-            {"id": "doc-1", "filename": "test1.pdf", "status": "uploaded"},
-            {"id": "doc-2", "filename": "test2.pdf", "status": "completed"}
-        ]
-        
-        # Mock statistics query
-        mock_stats_response = MagicMock()
-        mock_stats_response.data = [
-            {"status": "uploaded"},
-            {"status": "completed"}
-        ]
-        
-        # Mock college query
-        mock_college_response = MagicMock()
-        mock_college_response.data = [{"name": "Test College"}]
-        
-        # Mock profile query
-        mock_profile_response = MagicMock()
-        mock_profile_response.data = [{
-            "id": "admin-user-id",
-            "email": "admin@test.edu",
-            "role": "college_admin",
-            "college_id": "test-college-id"
-        }]
-        
-        # Configure the mock client to return different responses based on table
-        def mock_table_side_effect(table_name):
-            mock_table = MagicMock()
-            if table_name == "documents":
-                # First call is for documents, second is for statistics
-                mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = mock_docs_response
-                # For statistics call, return stats response
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_stats_response
-            elif table_name == "colleges":
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_college_response
-            elif table_name == "profiles":
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_profile_response
-            return mock_table
-        
-        mock_client.table.side_effect = mock_table_side_effect
-
-        response = client.get("/admin/documents")
-
-        assert response.status_code == 200
-        response_data = response.json()
-        assert "documents" in response_data
-        assert "statistics" in response_data
-        assert "college_info" in response_data
-        assert "user_profile" in response_data
-        assert response_data["statistics"]["total"] == 2
-        assert response_data["statistics"]["uploaded"] == 1
-        assert response_data["statistics"]["completed"] == 1
-        assert response_data["college_info"]["name"] == "Test College"
-
-    app.dependency_overrides = {}
-
-def test_get_query_history():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
-    app.dependency_overrides[get_current_user] = mock_admin_user
-
-    with patch("main.get_service_client") as mock_get_service_client:
-        mock_client = MagicMock()
-        mock_get_service_client.return_value = mock_client
-        
-        # Mock conversations query response
-        mock_conversations_response = MagicMock()
-        mock_conversations_response.data = [
-            {
-                "id": "conv-1",
-                "title": "Test Conversation 1",
-                "created_at": "2024-01-04T10:00:00Z",
-                "messages": [
-                    {"content": "What are the admission requirements?", "role": "user", "created_at": "2024-01-04T10:00:00Z"},
-                    {"content": "Here are the admission requirements...", "role": "assistant", "created_at": "2024-01-04T10:01:00Z"}
-                ]
-            },
-            {
-                "id": "conv-2", 
-                "title": "Test Conversation 2",
-                "created_at": "2024-01-04T09:00:00Z",
-                "messages": [
-                    {"content": "Tell me about the computer science program", "role": "user", "created_at": "2024-01-04T09:00:00Z"}
-                ]
-            }
-        ]
-        
-        mock_client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_conversations_response
-
-        response = client.get("/admin/query-history?limit=5")
-
-        assert response.status_code == 200
-        response_data = response.json()
-        assert "query_history" in response_data
-        assert "total_conversations" in response_data
-        assert len(response_data["query_history"]) == 2
-        assert response_data["query_history"][0]["query"] == "What are the admission requirements?"
-        assert response_data["query_history"][1]["query"] == "Tell me about the computer science program"
-        assert response_data["total_conversations"] == 2
-
-    app.dependency_overrides = {}
 
 def test_upload_document_unauthorized():
-    # Provide file so we don't get 422 Validation Error
-    files = {"file": ("syllabus.pdf", b"fake pdf content", "application/pdf")}
-    response = client.post("/admin/upload", files=files)
-    # Should be 401 Unauthorized
+    response = client.post(
+        "/admin/upload",
+        files={"file": ("catalog.txt", b"college handbook", "text/plain")},
+    )
+
     assert response.status_code == 401
+
 
 def test_upload_document_forbidden():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
     app.dependency_overrides[get_current_user] = mock_student_user
-    
-    files = {"file": ("syllabus.pdf", b"fake pdf content", "application/pdf")}
+
     response = client.post(
-        "/admin/upload", 
-        files=files,
-        data={"college_id": "test-college-id"}
+        "/admin/upload",
+        files={"file": ("catalog.txt", b"college handbook", "text/plain")},
+        data={"college_id": "college-1"},
     )
-    
+
+    app.dependency_overrides.clear()
+
     assert response.status_code == 403
-    
-    app.dependency_overrides = {}
+    assert response.json() == {"detail": "Not authorized to upload documents"}
 
-def test_get_pending_documents_success():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
 
-    app.dependency_overrides[get_current_user] = mock_super_admin_user
+def test_upload_document_success():
+    app.dependency_overrides[get_current_user] = mock_college_admin_user
+    document_id = str(uuid4())
+    super_admin_id = str(uuid4())
 
-    with patch("main.get_service_client") as mock_get_service_client:
-        mock_client = MagicMock()
-        mock_get_service_client.return_value = mock_client
-        
-        # Mock pending documents query response
-        mock_pending_response = MagicMock()
-        mock_pending_response.data = [
+    documents_table = MagicMock()
+    profiles_table = MagicMock()
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "documents": documents_table,
+        "profiles": profiles_table,
+    }[table_name]
+
+    documents_table.select.return_value.eq.return_value.eq.return_value.in_.return_value.execute.return_value = SimpleNamespace(
+        data=[]
+    )
+    profiles_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[{"id": super_admin_id}])
+    )
+
+    storage_response = MagicMock(status_code=201, text="")
+    db_response = MagicMock(status_code=201, text="")
+    db_response.json.return_value = [
+        {
+            "id": document_id,
+            "filename": "catalog.txt",
+            "file_type": "txt",
+            "file_size": len(b"college handbook"),
+            "status": "pending_approval",
+            "created_at": "2024-01-04T10:00:00Z",
+        }
+    ]
+
+    http_client = MagicMock()
+    http_client.post = AsyncMock(side_effect=[storage_response, db_response])
+
+    with (
+        patch(
+            "app.services.document_service.get_service_client",
+            return_value=mock_service_client,
+        ),
+        patch("app.services.document_service.httpx.AsyncClient") as mock_async_client,
+        patch(
+            "app.services.document_service.log_status_change"
+        ) as mock_log_status_change,
+        patch(
+            "app.services.document_service.notification_manager.create_document_notification",
+            new=AsyncMock(),
+        ) as mock_create_notification,
+    ):
+        mock_async_client.return_value.__aenter__.return_value = http_client
+        mock_async_client.return_value.__aexit__.return_value = None
+
+        response = client.post(
+            "/admin/upload",
+            files={"file": ("catalog.txt", b"college handbook", "text/plain")},
+            data={"college_id": "ignored-college-id"},
+        )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "success",
+        "message": "Document uploaded successfully. Awaiting super admin approval.",
+        "document": {
+            "id": document_id,
+            "filename": "catalog.txt",
+            "file_type": "txt",
+            "file_size": len(b"college handbook"),
+            "status": "pending_approval",
+            "uploaded_at": "2024-01-04T10:00:00Z",
+        },
+    }
+    mock_log_status_change.assert_called_once()
+    assert mock_create_notification.await_count == 1
+
+
+def test_get_query_history_success():
+    app.dependency_overrides[get_current_user] = mock_college_admin_user
+    conversations_table = MagicMock()
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "conversations": conversations_table,
+    }[table_name]
+
+    conversations_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = SimpleNamespace(
+        data=[
+            {
+                "id": "conv-1",
+                "title": "Admissions",
+                "created_at": "2024-01-04T10:00:00Z",
+                "messages": [
+                    {
+                        "content": "What are the admission requirements?",
+                        "role": "user",
+                        "created_at": "2024-01-04T10:00:00Z",
+                    },
+                    {
+                        "content": "Here are the requirements",
+                        "role": "assistant",
+                        "created_at": "2024-01-04T10:01:00Z",
+                    },
+                ],
+            },
+            {
+                "id": "conv-2",
+                "title": "Programs",
+                "created_at": "2024-01-04T09:00:00Z",
+                "messages": [
+                    {
+                        "content": "Tell me about the computer science program",
+                        "role": "user",
+                        "created_at": "2024-01-04T09:00:00Z",
+                    }
+                ],
+            },
+        ]
+    )
+
+    with patch(
+        "app.services.document_service.get_service_client",
+        return_value=mock_service_client,
+    ):
+        response = client.get("/admin/query-history", params={"limit": 5})
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "query_history": [
+            {
+                "id": "conv-1",
+                "query": "What are the admission requirements?",
+                "title": "Admissions",
+                "created_at": "2024-01-04T10:00:00Z",
+                "message_count": 2,
+            },
+            {
+                "id": "conv-2",
+                "query": "Tell me about the computer science program",
+                "title": "Programs",
+                "created_at": "2024-01-04T09:00:00Z",
+                "message_count": 1,
+            },
+        ],
+        "total_conversations": 2,
+    }
+
+
+def test_get_documents_with_statistics():
+    app.dependency_overrides[get_current_user] = mock_college_admin_user
+    documents_table = MagicMock()
+    document_chunks_table = MagicMock()
+    colleges_table = MagicMock()
+    profiles_table = MagicMock()
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "documents": documents_table,
+        "document_chunks": document_chunks_table,
+        "colleges": colleges_table,
+        "profiles": profiles_table,
+    }[table_name]
+
+    document_list_response = SimpleNamespace(
+        data=[
             {
                 "id": "doc-1",
-                "filename": "test1.pdf",
-                "file_type": "pdf",
+                "filename": "catalog.txt",
+                "status": "completed",
+                "file_size": 2048,
+                "processing_metadata": None,
+            },
+            {
+                "id": "doc-2",
+                "filename": "brochure.txt",
+                "status": "processing",
                 "file_size": 1024,
-                "college_id": "college-1",
-                "uploaded_by": "admin-1",
-                "created_at": "2024-01-04T10:00:00Z"
+                "processing_metadata": {
+                    "start_time": "2024-01-04T11:00:00Z",
+                    "triggered_by": "manual_trigger",
+                    "processing_type": "manual",
+                },
+            },
+        ]
+    )
+    document_stats_response = SimpleNamespace(
+        data=[{"status": "completed"}, {"status": "processing"}]
+    )
+
+    list_select = MagicMock()
+    list_filter = MagicMock()
+    stats_select = MagicMock()
+    stats_filter = MagicMock()
+    documents_table.select.side_effect = lambda fields, **kwargs: (
+        list_select if fields == "*" else stats_select
+    )
+    list_select.eq.return_value = list_filter
+    list_filter.order.return_value.execute.return_value = document_list_response
+    stats_select.eq.return_value = stats_filter
+    stats_filter.execute.return_value = document_stats_response
+
+    document_chunks_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(
+            data=[{"id": "chunk-1"}, {"id": "chunk-2"}],
+            count=2,
+        )
+    )
+    colleges_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[{"name": "Test College"}])
+    )
+    profiles_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(
+            data=[
+                {
+                    "id": "admin-user-id",
+                    "email": "admin@test.edu",
+                    "role": "college_admin",
+                    "college_id": "college-1",
+                }
+            ]
+        )
+    )
+    mock_service_client.rpc.return_value.execute.return_value = SimpleNamespace(
+        data=[{"completed_documents": 1}]
+    )
+
+    with patch(
+        "app.services.document_service.get_service_client",
+        return_value=mock_service_client,
+    ):
+        response = client.get("/admin/documents")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["statistics"] == {
+        "total": 2,
+        "uploaded": 0,
+        "pending_approval": 0,
+        "approved": 0,
+        "rejected": 0,
+        "processing": 1,
+        "completed": 1,
+        "failed": 0,
+        "rag_ready": 1,
+        "processing_queue": 1,
+    }
+    assert body["college_info"] == {"id": "college-1", "name": "Test College"}
+    assert body["user_profile"] == {
+        "id": "admin-user-id",
+        "email": "admin@test.edu",
+        "role": "college_admin",
+        "college_id": "college-1",
+    }
+    assert body["documents"][0]["rag_status"] == {
+        "is_rag_ready": True,
+        "chunk_count": 2,
+        "processing_progress": None,
+        "can_be_queried": True,
+    }
+    assert body["documents"][1]["rag_status"] == {
+        "is_rag_ready": False,
+        "chunk_count": 0,
+        "processing_progress": {
+            "started_at": "2024-01-04T11:00:00Z",
+            "triggered_by": "manual_trigger",
+            "processing_type": "manual",
+            "estimated_completion": None,
+        },
+        "can_be_queried": False,
+    }
+
+
+def test_trigger_manual_rag_processing_success():
+    app.dependency_overrides[get_current_user] = mock_college_admin_user
+    document_id = str(uuid4())
+    documents_table = MagicMock()
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "documents": documents_table,
+    }[table_name]
+
+    documents_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = SimpleNamespace(
+        data=[
+            {
+                "id": document_id,
+                "filename": "catalog.txt",
+                "status": "approved",
             }
         ]
-        
-        # Mock college query response
-        mock_college_response = MagicMock()
-        mock_college_response.data = [{"name": "Test College"}]
-        
-        # Mock profile query response
-        mock_profile_response = MagicMock()
-        mock_profile_response.data = [{"email": "admin@test.edu"}]
-        
-        # Configure the mock client to return different responses based on table
-        def mock_table_side_effect(table_name):
-            mock_table = MagicMock()
-            if table_name == "documents":
-                mock_table.select.return_value.in_.return_value.order.return_value.execute.return_value = mock_pending_response
-            elif table_name == "colleges":
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_college_response
-            elif table_name == "profiles":
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_profile_response
-            return mock_table
-        
-        mock_client.table.side_effect = mock_table_side_effect
+    )
+    documents_table.update.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[])
+    )
 
-        response = client.get("/super-admin/pending-documents")
+    with (
+        patch(
+            "app.services.document_service.get_service_client",
+            return_value=mock_service_client,
+        ),
+        patch(
+            "app.services.document_service.log_status_change"
+        ) as mock_log_status_change,
+        patch(
+            "app.services.document_service.trigger_rag_processing_with_status_tracking",
+            new=AsyncMock(),
+        ) as mock_trigger_rag,
+    ):
+        response = client.post(
+            "/admin/trigger-rag-processing",
+            params={"document_id": document_id},
+        )
 
-        assert response.status_code == 200
-        response_data = response.json()
-        assert "pending_documents" in response_data
-        assert "total_pending" in response_data
-        assert len(response_data["pending_documents"]) == 1
-        assert response_data["pending_documents"][0]["filename"] == "test1.pdf"
-        assert response_data["pending_documents"][0]["college_name"] == "Test College"
-        assert response_data["pending_documents"][0]["uploader_email"] == "admin@test.edu"
-        assert response_data["total_pending"] == 1
+    app.dependency_overrides.clear()
 
-    app.dependency_overrides = {}
-
-def test_approve_document_success():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
-    app.dependency_overrides[get_current_user] = mock_super_admin_user
-
-    with patch("main.get_service_client") as mock_get_service_client:
-        mock_client = MagicMock()
-        mock_get_service_client.return_value = mock_client
-        
-        # Mock document query response
-        mock_doc_response = MagicMock()
-        mock_doc_response.data = [{
-            "id": "550e8400-e29b-41d4-a716-446655440000",
-            "filename": "test.pdf",
-            "status": "pending_approval",
-            "college_id": "college-1"
-        }]
-        
-        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_doc_response
-
-        # Mock the httpx client for database operations
-        with patch("httpx.AsyncClient") as mock_httpx:
-            mock_http_client = MagicMock()
-            mock_httpx.return_value.__aenter__.return_value = mock_http_client
-            mock_httpx.return_value.__aexit__.return_value = None
-            
-            # Mock database update response
-            mock_update_response = MagicMock()
-            mock_update_response.status_code = 200
-            mock_update_response.json.return_value = [{"id": "550e8400-e29b-41d4-a716-446655440000", "status": "approved"}]
-            
-            # Mock approval record response
-            mock_approval_response = MagicMock()
-            mock_approval_response.status_code = 201
-            
-            # Configure mock to return different responses for different calls
-            def mock_patch_side_effect(url, **kwargs):
-                return mock_update_response
-            
-            def mock_post_side_effect(url, **kwargs):
-                return mock_approval_response
-            
-            # Make the methods async
-            async def async_patch(*args, **kwargs):
-                return mock_patch_side_effect(*args, **kwargs)
-            
-            async def async_post(*args, **kwargs):
-                return mock_post_side_effect(*args, **kwargs)
-            
-            mock_http_client.patch = async_patch
-            mock_http_client.post = async_post
-
-            # Mock background task processing
-            with patch("main.BackgroundTasks.add_task") as mock_add_task:
-                response = client.post(
-                    "/super-admin/approve-document",
-                    json={
-                        "document_id": "550e8400-e29b-41d4-a716-446655440000",
-                        "comments": "Approved for processing"
-                    }
-                )
-
-                assert response.status_code == 200
-                response_data = response.json()
-                assert response_data["status"] == "success"
-                assert "approved for processing" in response_data["message"].lower()
-                assert response_data["document"]["id"] == "550e8400-e29b-41d4-a716-446655440000"
-                assert response_data["document"]["status"] == "approved"
-                
-                # Verify background task was added
-                mock_add_task.assert_called_once()
-
-    app.dependency_overrides = {}
-
-def test_reject_document_success():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
-    app.dependency_overrides[get_current_user] = mock_super_admin_user
-
-    with patch("main.get_service_client") as mock_get_service_client:
-        mock_client = MagicMock()
-        mock_get_service_client.return_value = mock_client
-        
-        # Mock document query response
-        mock_doc_response = MagicMock()
-        mock_doc_response.data = [{
-            "id": "550e8400-e29b-41d4-a716-446655440001",
-            "filename": "test.pdf",
-            "status": "pending_approval",
-            "college_id": "college-1"
-        }]
-        
-        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_doc_response
-
-        # Mock the httpx client for database operations
-        with patch("httpx.AsyncClient") as mock_httpx:
-            mock_http_client = MagicMock()
-            mock_httpx.return_value.__aenter__.return_value = mock_http_client
-            mock_httpx.return_value.__aexit__.return_value = None
-            
-            # Mock database update response
-            mock_update_response = MagicMock()
-            mock_update_response.status_code = 200
-            mock_update_response.json.return_value = [{"id": "550e8400-e29b-41d4-a716-446655440001", "status": "rejected"}]
-            
-            # Mock approval record response
-            mock_approval_response = MagicMock()
-            mock_approval_response.status_code = 201
-            
-            # Configure mock to return different responses for different calls
-            def mock_patch_side_effect(url, **kwargs):
-                return mock_update_response
-            
-            def mock_post_side_effect(url, **kwargs):
-                return mock_approval_response
-            
-            # Make the methods async
-            async def async_patch(*args, **kwargs):
-                return mock_patch_side_effect(*args, **kwargs)
-            
-            async def async_post(*args, **kwargs):
-                return mock_post_side_effect(*args, **kwargs)
-            
-            mock_http_client.patch = async_patch
-            mock_http_client.post = async_post
-
-            response = client.post(
-                "/super-admin/reject-document",
-                json={
-                    "document_id": "550e8400-e29b-41d4-a716-446655440001",
-                    "reason": "Document quality is insufficient"
-                }
-            )
-
-            assert response.status_code == 200
-            response_data = response.json()
-            assert response_data["status"] == "success"
-            assert "rejected" in response_data["message"].lower()
-            assert response_data["document"]["id"] == "550e8400-e29b-41d4-a716-446655440001"
-            assert response_data["document"]["status"] == "rejected"
-            assert response_data["document"]["rejection_reason"] == "Document quality is insufficient"
-
-    app.dependency_overrides = {}
-
-def test_super_admin_endpoints_unauthorized():
-    # Test without authentication
-    response = client.get("/super-admin/pending-documents")
-    assert response.status_code == 401
-    
-    response = client.post("/super-admin/approve-document", json={"document_id": "550e8400-e29b-41d4-a716-446655440000"})
-    assert response.status_code == 401
-    
-    response = client.post("/super-admin/reject-document", json={"document_id": "550e8400-e29b-41d4-a716-446655440000", "reason": "test"})
-    assert response.status_code == 401
-
-def test_super_admin_endpoints_forbidden():
-    if get_current_user is None:
-        pytest.fail("Dependency get_current_user not found")
-
-    # Test with college admin (should be forbidden)
-    app.dependency_overrides[get_current_user] = mock_admin_user
-    
-    response = client.get("/super-admin/pending-documents")
-    assert response.status_code == 403
-    
-    response = client.post("/super-admin/approve-document", json={"document_id": "550e8400-e29b-41d4-a716-446655440000"})
-    assert response.status_code == 403
-    
-    response = client.post("/super-admin/reject-document", json={"document_id": "550e8400-e29b-41d4-a716-446655440000", "reason": "test"})
-    assert response.status_code == 403
-    
-    app.dependency_overrides = {}
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["message"] == "RAG processing started for document 'catalog.txt'"
+    assert body["document"]["id"] == document_id
+    assert body["document"]["filename"] == "catalog.txt"
+    assert body["document"]["status"] == "processing"
+    assert body["document"]["triggered_by"] == "admin-user-id"
+    assert "triggered_at" in body["document"]
+    mock_log_status_change.assert_called_once()
+    assert mock_trigger_rag.await_count == 1

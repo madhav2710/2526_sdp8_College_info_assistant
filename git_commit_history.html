@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Git Commit History – SDP-8 Project Submission</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Times+New+Roman&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Source Serif 4', 'Times New Roman', Georgia, serif;
+      color: #111;
+      background: #fff;
+      font-size: 11pt;
+      line-height: 1.6;
+      padding: 0;
+    }
+
+    @media print {
+      body { padding: 0; }
+      .no-print { display: none !important; }
+      @page { margin: 18mm 20mm 18mm 20mm; size: A4; }
+      .page-break { page-break-before: always; }
+      .no-break { page-break-inside: avoid; }
+    }
+
+    @media screen {
+      body { padding: 40px 60px; max-width: 850px; margin: 0 auto; }
+    }
+
+    /* ── Cover / Title Page ── */
+    .title-page {
+      text-align: center;
+      padding: 40px 0 30px;
+      border-bottom: 2px solid #111;
+      margin-bottom: 30px;
+    }
+    .university-name {
+      font-size: 16pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 2px;
+    }
+    .faculty-name {
+      font-size: 11pt;
+      font-style: italic;
+      color: #333;
+      margin-bottom: 20px;
+    }
+    .doc-title {
+      font-size: 18pt;
+      font-weight: 700;
+      margin: 20px 0 6px;
+      letter-spacing: 0.5px;
+    }
+    .doc-subtitle {
+      font-size: 12pt;
+      color: #444;
+      margin-bottom: 20px;
+    }
+    .project-info-table {
+      margin: 20px auto 0;
+      border-collapse: collapse;
+      font-size: 10.5pt;
+      text-align: left;
+    }
+    .project-info-table td {
+      padding: 4px 14px;
+      vertical-align: top;
+    }
+    .project-info-table td:first-child {
+      font-weight: 700;
+      white-space: nowrap;
+      color: #333;
+    }
+    .project-info-table td:last-child {
+      color: #111;
+    }
+
+    /* ── Section headings ── */
+    h2 {
+      font-size: 13pt;
+      font-weight: 700;
+      margin: 28px 0 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #999;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    h3 {
+      font-size: 11.5pt;
+      font-weight: 700;
+      margin: 20px 0 8px;
+      color: #222;
+    }
+
+    /* ── Body text ── */
+    p {
+      margin: 0 0 8px;
+      text-align: justify;
+    }
+
+    /* ── Tables ── */
+    table.formal {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 18px;
+      font-size: 10pt;
+    }
+    table.formal th,
+    table.formal td {
+      border: 1px solid #555;
+      padding: 5px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    table.formal th {
+      background: #eee;
+      font-weight: 700;
+      font-size: 9.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    table.formal tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+    table.formal code {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 9.5pt;
+      background: #f0f0f0;
+      padding: 1px 3px;
+    }
+
+
+
+    /* ── Numbered sections ── */
+    .sr-no { text-align: center; width: 35px; }
+    .hash-col { width: 60px; }
+    .date-col { width: 75px; }
+    .author-col { width: 110px; }
+    .msg-col { }
+
+    /* ── Footer ── */
+    .doc-footer {
+      margin-top: 40px;
+      padding-top: 10px;
+      border-top: 1px solid #999;
+      font-size: 9pt;
+      color: #555;
+      text-align: center;
+    }
+
+    /* ── Print button ── */
+    .print-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #222;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      font-family: sans-serif;
+    }
+    .print-btn:hover { background: #000; }
+  </style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">⎙ Print / Save as PDF</button>
+
+<!-- ════════════════════ TITLE PAGE ════════════════════ -->
+<div class="title-page">
+  <div class="university-name">Dharmsinh Desai University</div>
+  <div class="faculty-name">Faculty of Technology</div>
+
+  <div class="doc-title">Project Git Commit History</div>
+  <div class="doc-subtitle">Software Development Project (SDP) — Group 8</div>
+
+  <table class="project-info-table">
+    <tr><td>Project Title:</td><td>CollegeInfo-Agent — Multi-College Academic Assistant</td></tr>
+    <tr><td>Repository:</td><td>github.com/madhav2710/2526_sdp8_College_info_assistant</td></tr>
+    <tr><td>Project Duration:</td><td>December 2025 – March 2026</td></tr>
+    <tr><td>Date of Submission:</td><td>14 March 2026</td></tr>
+    <tr><td>Team Members:</td><td>Karthiya Yash Kiranbhai, Madhav Javia, Vishv (VISHV44)</td></tr>
+  </table>
+</div>
+
+<!-- ════════════════════ 1. OVERVIEW ════════════════════ -->
+<h2>1. Overview</h2>
+<p>
+  This document records the complete Git commit history of the <em>CollegeInfo-Agent</em> project,
+  a multi-college academic assistant platform built with FastAPI, React, Supabase, and Google Gemini AI.
+  All commits listed below are non-merge commits obtained from <code>git log --all --no-merges</code>.
+  Merge commits (9 total) have been excluded for clarity.
+</p>
+
+<!-- ════════════════════ 2. SUMMARY ════════════════════ -->
+<h2>2. Project Summary</h2>
+<table class="formal">
+  <tr><th style="width:200px;">Metric</th><th>Value</th></tr>
+  <tr><td>Total Commits (non-merge)</td><td>42</td></tr>
+  <tr><td>Total Commits (including merges)</td><td>51</td></tr>
+  <tr><td>Contributors</td><td>3</td></tr>
+  <tr><td>Development Period</td><td>8 December 2025 – 9 March 2026 (≈ 3 months)</td></tr>
+  <tr><td>Technology Stack</td><td>FastAPI · React 18 · Vite · Supabase (PostgreSQL + pgvector) · Google Gemini AI · Docker · Caddy</td></tr>
+</table>
+
+
+
+<div class="page-break"></div>
+<!-- ════════════════════ 3. DETAILED COMMIT LOG ════════════════════ -->
+<h2>3. Detailed Commit History</h2>
+<p>
+  Commits are grouped by development phase and listed in chronological order within each phase.
+</p>
+
+<!-- Phase 1 -->
+<h3 class="no-break">3.1 &ensp; Phase 1 — Project Initialization &amp; Learning (Dec 2025)</h3>
+<table class="formal no-break">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Commit Message</th>
+  </tr>
+  <tr>
+    <td class="sr-no">1</td>
+    <td><code>31bba54</code></td>
+    <td>08-12-2025</td>
+    <td>Madhav Javia</td>
+    <td>Add project README with overview and features</td>
+  </tr>
+  <tr>
+    <td class="sr-no">2</td>
+    <td><code>ad41c77</code></td>
+    <td>08-12-2025</td>
+    <td>Madhav Javia</td>
+    <td>Add ChromaDB demo notebook and .DS_Store files</td>
+  </tr>
+  <tr>
+    <td class="sr-no">3</td>
+    <td><code>a7c9395</code></td>
+    <td>15-12-2025</td>
+    <td>Karthiya Yash K.</td>
+    <td>Initialize React frontend with shadcn/ui and Tailwind</td>
+  </tr>
+  <tr>
+    <td class="sr-no">4</td>
+    <td><code>81a1071</code></td>
+    <td>15-12-2025</td>
+    <td>Madhav Javia</td>
+    <td>Add FastAPI backend with database connection</td>
+  </tr>
+  <tr>
+    <td class="sr-no">5</td>
+    <td><code>d5d5d25</code></td>
+    <td>15-12-2025</td>
+    <td>Karthiya Yash K.</td>
+    <td>Replace ChromaDB example with LangChain learning notebook</td>
+  </tr>
+  <tr>
+    <td class="sr-no">6</td>
+    <td><code>5264da9</code></td>
+    <td>22-12-2025</td>
+    <td>Karthiya Yash K.</td>
+    <td>Add .gitignore and stop tracking sensitive/generated files</td>
+  </tr>
+  <tr>
+    <td class="sr-no">7</td>
+    <td><code>dbde266</code></td>
+    <td>22-12-2025</td>
+    <td>Madhav Javia</td>
+    <td>LAB04 — Backend env/main updates and demo component</td>
+  </tr>
+  <tr>
+    <td class="sr-no">8</td>
+    <td><code>f25ac87</code></td>
+    <td>22-12-2025</td>
+    <td>Vishv</td>
+    <td>Created Admin UI and moved chat section to /frontend/User</td>
+  </tr>
+  <tr>
+    <td class="sr-no">9</td>
+    <td><code>92052b5</code></td>
+    <td>22-12-2025</td>
+    <td>Karthiya Yash K.</td>
+    <td>Add RAG document extraction and embedding notebook</td>
+  </tr>
+</table>
+
+<!-- Phase 2 -->
+<h3 class="no-break">3.2 &ensp; Phase 2 — Core Backend, Auth, Chat &amp; RAG Pipeline (Jan 3–4, 2026)</h3>
+<table class="formal no-break">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Commit Message</th>
+  </tr>
+  <tr>
+    <td class="sr-no">10</td>
+    <td><code>d7ab5a4</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Add .gitignore</td>
+  </tr>
+  <tr>
+    <td class="sr-no">11</td>
+    <td><code>1b8aab2</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Initial database schema and backend project initialization</td>
+  </tr>
+  <tr>
+    <td class="sr-no">12</td>
+    <td><code>8f9b489</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>End-to-end authentication and role-based access control</td>
+  </tr>
+  <tr>
+    <td class="sr-no">13</td>
+    <td><code>5aad23a</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Functional student chat with history and mock response</td>
+  </tr>
+  <tr>
+    <td class="sr-no">14</td>
+    <td><code>251a978</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Implement document upload backend with tests</td>
+  </tr>
+  <tr>
+    <td class="sr-no">15</td>
+    <td><code>a48ba95</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Implement basic RAG processing (extraction + embedding)</td>
+  </tr>
+  <tr>
+    <td class="sr-no">16</td>
+    <td><code>e5c347e</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Implement Admin Dashboard frontend for document management</td>
+  </tr>
+  <tr>
+    <td class="sr-no">17</td>
+    <td><code>9a833ad</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Add admin utilities and improve document upload flow</td>
+  </tr>
+  <tr>
+    <td class="sr-no">18</td>
+    <td><code>89d9eba</code></td>
+    <td>03-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Delete conductor/tracks/mvp_auth_rag_20260103 directory</td>
+  </tr>
+  <tr>
+    <td class="sr-no">19</td>
+    <td><code>fa9538a</code></td>
+    <td>04-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Add notification and approval system for documents</td>
+  </tr>
+  <tr>
+    <td class="sr-no">20</td>
+    <td><code>47e3004</code></td>
+    <td>04-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Improve RAG chunking, retrieval, and chat integration</td>
+  </tr>
+</table>
+
+<!-- Phase 3 -->
+<h3 class="no-break">3.3 &ensp; Phase 3 — Super Admin, Workflow &amp; API Refinement (Jan 4–19, 2026)</h3>
+<table class="formal no-break">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Commit Message</th>
+  </tr>
+  <tr>
+    <td class="sr-no">21</td>
+    <td><code>af2de68</code></td>
+    <td>04-01-2026</td>
+    <td>Vishv</td>
+    <td>Created super admin UI</td>
+  </tr>
+  <tr>
+    <td class="sr-no">22</td>
+    <td><code>cc61b4c</code></td>
+    <td>05-01-2026</td>
+    <td>Vishv</td>
+    <td>Add Supabase vector store integration to RAG notebook</td>
+  </tr>
+  <tr>
+    <td class="sr-no">23</td>
+    <td><code>299161a</code></td>
+    <td>05-01-2026</td>
+    <td>Vishv</td>
+    <td>Add workflow management and enhance document processing</td>
+  </tr>
+  <tr>
+    <td class="sr-no">24</td>
+    <td><code>3c46ec6</code></td>
+    <td>05-01-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Refactor Super Admin panel to context and modular components</td>
+  </tr>
+  <tr>
+    <td class="sr-no">25</td>
+    <td><code>4c8b730</code></td>
+    <td>12-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Add Super Admin dashboard and APIs</td>
+  </tr>
+  <tr>
+    <td class="sr-no">26</td>
+    <td><code>01e152f</code></td>
+    <td>12-01-2026</td>
+    <td>Vishv</td>
+    <td>Refactor API usage and improve document upload logic</td>
+  </tr>
+  <tr>
+    <td class="sr-no">27</td>
+    <td><code>67216a6</code></td>
+    <td>19-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Add superadmin CRUD for colleges and admins</td>
+  </tr>
+  <tr>
+    <td class="sr-no">28</td>
+    <td><code>3699dc2</code></td>
+    <td>19-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Improve file validation and login error handling</td>
+  </tr>
+  <tr>
+    <td class="sr-no">29</td>
+    <td><code>48d3787</code></td>
+    <td>19-01-2026</td>
+    <td>Vishv</td>
+    <td>Enhance RAG config, fallback, and error handling</td>
+  </tr>
+  <tr>
+    <td class="sr-no">30</td>
+    <td><code>90e3bdd</code></td>
+    <td>19-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Add guest chat and user signup with college selection</td>
+  </tr>
+  <tr>
+    <td class="sr-no">31</td>
+    <td><code>ad9c579</code></td>
+    <td>19-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Update main.py</td>
+  </tr>
+</table>
+
+<!-- Phase 4 -->
+<h3 class="no-break">3.4 &ensp; Phase 4 — Chat UX &amp; College Selection (Jan 24–25, 2026)</h3>
+<table class="formal no-break">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Commit Message</th>
+  </tr>
+  <tr>
+    <td class="sr-no">32</td>
+    <td><code>aad1f13</code></td>
+    <td>24-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Add chat history sidebar and improve chat UI</td>
+  </tr>
+  <tr>
+    <td class="sr-no">33</td>
+    <td><code>072a700</code></td>
+    <td>25-01-2026</td>
+    <td>Madhav Javia</td>
+    <td>Add college selection for guest chat and UI improvements</td>
+  </tr>
+</table>
+
+<!-- Phase 5 -->
+<h3 class="no-break">3.5 &ensp; Phase 5 — Database Unification, Modularization &amp; Docker (Feb 2026)</h3>
+<table class="formal no-break">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Commit Message</th>
+  </tr>
+  <tr>
+    <td class="sr-no">34</td>
+    <td><code>23218ac</code></td>
+    <td>08-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Adjust backend config/main and tests</td>
+  </tr>
+  <tr>
+    <td class="sr-no">35</td>
+    <td><code>b48c402</code></td>
+    <td>08-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Update admin and user frontends plus API clients</td>
+  </tr>
+  <tr>
+    <td class="sr-no">36</td>
+    <td><code>402d09c</code></td>
+    <td>09-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Migrated database to use only one unified Supabase project</td>
+  </tr>
+  <tr>
+    <td class="sr-no">37</td>
+    <td><code>0956d10</code></td>
+    <td>13-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Unify Supabase migration flow and improve guest chat fallback</td>
+  </tr>
+  <tr>
+    <td class="sr-no">38</td>
+    <td><code>b5130d5</code></td>
+    <td>21-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Finalize single-container Caddy + Uvicorn Docker deployment</td>
+  </tr>
+</table>
+
+<!-- Phase 6 -->
+<h3 class="no-break">3.6 &ensp; Phase 6 — Deployment, Bug Fixes &amp; Latest Changes (Feb–Mar 2026)</h3>
+<table class="formal no-break">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Commit Message</th>
+  </tr>
+  <tr>
+    <td class="sr-no">39</td>
+    <td><code>16472a9</code></td>
+    <td>21-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Replace custom markdown parser with react-markdown and remark-gfm</td>
+  </tr>
+  <tr>
+    <td class="sr-no">40</td>
+    <td><code>7e05373</code></td>
+    <td>22-02-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Set up AWS Copilot configuration for API deployment; enhance UUID fallback</td>
+  </tr>
+  <tr>
+    <td class="sr-no">41</td>
+    <td><code>b9d6806</code></td>
+    <td>09-03-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Checkpoint current local changes</td>
+  </tr>
+  <tr>
+    <td class="sr-no">42</td>
+    <td><code>327c2d4</code></td>
+    <td>09-03-2026</td>
+    <td>Karthiya Yash K.</td>
+    <td>Index on chore/wip-current-changes: checkpoint current local changes</td>
+  </tr>
+</table>
+
+<!-- ════════════════════ 4. EXCLUDED MERGE COMMITS ════════════════════ -->
+<h2>4. Excluded Merge Commits</h2>
+<p>
+  The following 9 merge commits were excluded from the detailed log above, as they represent
+  integration points rather than individual feature work:
+</p>
+<table class="formal">
+  <tr>
+    <th class="sr-no">Sr.</th>
+    <th class="hash-col">Commit</th>
+    <th class="date-col">Date</th>
+    <th class="author-col">Author</th>
+    <th class="msg-col">Merge Description</th>
+  </tr>
+  <tr><td class="sr-no">1</td><td><code>fba963a</code></td><td>15-12-2025</td><td>Karthiya Yash K.</td><td>Merge branch 'main'</td></tr>
+  <tr><td class="sr-no">2</td><td><code>d6a667f</code></td><td>22-12-2025</td><td>Madhav Javia</td><td>Merge branch 'main'</td></tr>
+  <tr><td class="sr-no">3</td><td><code>ab9e68a</code></td><td>22-12-2025</td><td>Vishv</td><td>Merge branch 'main'</td></tr>
+  <tr><td class="sr-no">4</td><td><code>3a39046</code></td><td>22-12-2025</td><td>Karthiya Yash K.</td><td>Merge branch 'main'</td></tr>
+  <tr><td class="sr-no">5</td><td><code>7e2b0e1</code></td><td>04-01-2026</td><td>Vishv</td><td>Merge branch 'main'</td></tr>
+  <tr><td class="sr-no">6</td><td><code>8274c3f</code></td><td>05-01-2026</td><td>Karthiya Yash K.</td><td>Merge branch 'main'</td></tr>
+  <tr><td class="sr-no">7</td><td><code>94a7b55</code></td><td>24-01-2026</td><td>Madhav Javia</td><td>Merge pull request #1 from madhav2710/Madhav</td></tr>
+  <tr><td class="sr-no">8</td><td><code>33cea37</code></td><td>25-01-2026</td><td>Madhav Javia</td><td>Merge branch 'Madhav'</td></tr>
+</table>
+
+<!-- ════════════════════ FOOTER ════════════════════ -->
+<div class="doc-footer">
+  <p>
+    <strong>Dharmsinh Desai University</strong> &nbsp;·&nbsp;
+    Software Development Project (SDP-8) &nbsp;·&nbsp;
+    Academic Year 2025–26
+  </p>
+  <p style="margin-top:4px;">
+    This document was generated from <code>git log --all</code> on 14 March 2026.
+    Repository: <em>github.com/madhav2710/2526_sdp8_College_info_assistant</em>
+  </p>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,734 @@
+commit 7e05373de513dee98be550edccf706a5cbd56f69
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sun Feb 22 15:55:32 2026 +0530
+
+    feat: Set up initial AWS Copilot configuration for API deployment and enhance chat interface UUID generation with a fallback.
+
+ .gitignore                                     |  5 +++
+ AWS_DEPLOYMENT_PLAN.md                         | 14 +++----
+ copilot/api/manifest.yml                       | 53 ++++++++++++++++++++++++++
+ copilot/environments/prod/manifest.yml         | 21 ++++++++++
+ frontend/User/src/components/ChatInterface.jsx | 46 +++++++++++++---------
+ 5 files changed, 114 insertions(+), 25 deletions(-)
+
+commit 16472a9b0f9daba3e77d211441479320e0a53d97
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Feb 21 21:14:18 2026 +0530
+
+    fix(frontend): replace custom markdown parser with react-markdown and remark-gfm
+    
+    - Added `react-markdown` and `remark-gfm` dependencies to the frontend `User` project.
+    - Refactored `MarkdownRenderer.jsx` to completely replace the previous buggy and rigid Regex-based parser with `ReactMarkdown`.
+    - Implemented a specialized pre-processor that iterates to fix flawed Markdown formatting returned by the backend:
+      1. It properly unescapes literal `\n` characters embedded in the response strings.
+      2. It enforces a strict blank line before any table row (`|`), which is a hard requirement for the `remark-gfm` plugin to accurately parse and render block elements as HTML tables.
+    - Re-implemented all default markdown tags (`h1`-`h6`, `p`, `a`, `strong`, `em`, `blockquote`, `ul`, `ol`, `li`, `pre`, `code`) and table components (`table`, `thead`, `tbody`, `tr`, `th`, `td`) to retain existing UI Tailwind-based class styling and aesthetics.
+
+ frontend/User/package-lock.json                   | 1567 ++++++++++++++++++++-
+ frontend/User/package.json                        |   16 +-
+ frontend/User/src/components/MarkdownRenderer.jsx |  330 ++---
+ 3 files changed, 1663 insertions(+), 250 deletions(-)
+
+commit b5130d5446c6668e900b49c946fe872cecef4046
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Feb 21 14:01:13 2026 +0530
+
+    feat(docker): finalize single-container Caddy + Uvicorn deployment
+    
+    - complete Docker runtime stack (Dockerfile, docker-compose, Caddy, supervisord)
+    - validate /api proxy and SPA routes for /, /admin, /super
+    - add scripts/manual_docker_check.sh for repeatable smoke/manual checks
+    - update README and execution tracker with Docker run/verification status
+
+ .dockerignore                                      |   23 +
+ .gitignore                                         |    7 +
+ AWS_DEPLOYMENT_PLAN.md                             |  293 ++
+ Caddyfile                                          |   42 +
+ Dockerfile                                         |   45 +
+ MASTER_TASK_EXECUTION_TRACKER.md                   |  394 +++
+ PLAN_FEASIBILITY_ANALYSIS.md                       |  114 +
+ README.md                                          |   46 +
+ TASK_1A_USER_EDITORIAL_MINIMAL_UI.md               |   97 +
+ TASK_1B_ADMIN_SUPERADMIN_SWISS_CONSOLE_UI.md       |   97 +
+ TASK_1_BACKEND_MODULARIZATION.md                   |  317 ++
+ TASK_2_DOCKER_CONTAINERIZATION.md                  |  298 ++
+ backend/app/legacy_main.py                         | 3594 ++++++++++++++++++++
+ backend/app/routers/__init__.py                    |    3 +
+ backend/app/routers/admin.py                       |   13 +
+ backend/app/routers/auth.py                        |    7 +
+ backend/app/routers/chat.py                        |   13 +
+ backend/app/routers/notifications.py               |   21 +
+ backend/app/routers/superadmin.py                  |   82 +
+ backend/app/routers/system.py                      |   16 +
+ backend/app/routers/user.py                        |    7 +
+ backend/app/schemas/__init__.py                    |   28 +
+ backend/app/schemas/admin.py                       |   20 +
+ backend/app/schemas/auth.py                        |   19 +
+ backend/app/schemas/chat.py                        |   23 +
+ backend/app/schemas/college.py                     |   21 +
+ backend/app/schemas/document.py                    |   26 +
+ backend/app/services/__init__.py                   |    1 +
+ backend/app/services/chat_service.py               |   31 +
+ backend/app/services/document_service.py           |  137 +
+ backend/app/services/governance_service.py         |   21 +
+ backend/main.py                                    | 2986 +---------------
+ backend/requirements.txt                           |  123 +
+ backend/tests/test_admin.py                        |   12 +-
+ backend/tests/test_auth.py                         |    6 +-
+ backend/tests/test_chat.py                         |   10 +-
+ docker-compose.yml                                 |   11 +
+ frontend/Admin/src/App.jsx                         |  856 +++--
+ frontend/Admin/src/App.test.jsx                    |  939 ++---
+ frontend/Admin/src/index.css                       |  118 +-
+ frontend/Admin/vite.config.js                      |   13 +-
+ frontend/Super admin/src/App.jsx                   |  913 +++--
+ .../src/components/PendingDocuments.jsx            |  175 +-
+ frontend/Super admin/src/index.css                 |  118 +
+ frontend/Super admin/vite.config.js                |    8 +-
+ frontend/User/index.html                           |   23 +-
+ frontend/User/src/App.jsx                          |  268 +-
+ .../User/src/components/ChatHistorySidebar.jsx     |  450 ++-
+ frontend/User/src/components/ChatInterface.jsx     |  766 ++---
+ frontend/User/src/components/CollegeSelector.jsx   |  200 +-
+ frontend/User/src/components/Login.jsx             |  349 +-
+ frontend/User/src/components/MarkdownRenderer.jsx  |  212 ++
+ frontend/User/src/components/ProfileCard.jsx       |  291 +-
+ frontend/User/src/components/SuperAdminPanel.jsx   |  446 ---
+ frontend/User/src/components/demo.jsx              |   73 -
+ frontend/User/src/index.css                        |  351 +-
+ frontend/User/vite.config.js                       |   12 +-
+ scripts/manual_docker_check.sh                     |  197 ++
+ supervisord.conf                                   |   25 +
+ 59 files changed, 9764 insertions(+), 6043 deletions(-)
+
+commit 0956d10f1b26cc9e0c76ee49dac9b695d8dae54a
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Fri Feb 13 21:48:52 2026 +0530
+
+    feat: unify Supabase migration flow and improve guest chat fallback
+    
+    Refactor migration runner with plans, env loading, and safer connection selection.
+    
+    Move old SQL migrations to backend/migrations/legacy and update docs for unified Supabase + pgvector architecture.
+    
+    Add .env.example files and improve guest-chat RAG fallback metadata.
+
+ README.md                                          | 230 ++++++----
+ backend/.env.example                               |  56 +++
+ backend/main.py                                    |  27 +-
+ .../migrations/{ => legacy}/001_initial_schema.sql |   0
+ .../002_admin_platform_enhancements.sql            |   0
+ .../{ => legacy}/003_robustness_improvements.sql   |   0
+ .../004_fix_uploaded_by_constraint.sql             |   0
+ .../004_vector_storage_enhancements.sql            |   0
+ .../{ => legacy}/005_add_messages_metadata.sql     |   0
+ .../{ => legacy}/006_fix_messages_table.sql        |   0
+ .../007_add_missing_updated_at_column.sql          |   0
+ backend/run_migration.py                           | 464 +++++++++++++++++----
+ frontend/Admin/.env.example                        |   1 +
+ frontend/Super admin/.env.example                  |   1 +
+ frontend/User/.env.example                         |   1 +
+ 15 files changed, 625 insertions(+), 155 deletions(-)
+
+commit 402d09ca742a8c41aa5d887c07beaf4f1f88cb8b
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Feb 9 17:24:05 2026 +0530
+
+    Migrated database to use only one database
+
+ .gitignore                                         |    1 +
+ backend/app/core/config.py                         |   65 +-
+ backend/app/core/database.py                       |   68 +-
+ backend/app/core/notifications.py                  |   47 +-
+ backend/app/core/rag.py                            |   61 +-
+ backend/main.py                                    |  181 ++-
+ .../000_unified_single_project_schema.sql          | 1166 ++++++++++++++++++++
+ .../000_unified_single_project_schema_check.sql    |  172 +++
+ .../migrations/001_repair_auth_foreign_keys.sql    |  175 +++
+ .../migrations/002_admin_platform_enhancements.sql |   27 +-
+ .../008_fix_notify_document_status_change_case.sql |  109 ++
+ 11 files changed, 1983 insertions(+), 89 deletions(-)
+
+commit 33cea37e12dd192cbe781a66c7bd3fa368e879f3
+Merge: 94a7b55 072a700
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Sun Jan 25 14:33:50 2026 +0530
+
+    Merge branch 'Madhav'
+
+commit 072a7009520124ed99e9db051e461633ad06fbb5
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Sun Jan 25 14:32:54 2026 +0530
+
+    Add college selection for guest chat and UI improvements
+    
+    Introduces a CollegeSelector component to allow users and guests to select a college in the chat interface. Updates backend to accept and validate an optional college_id for guest chat requests, defaulting to the first available college if none is provided. The frontend now persists the selected college for guests and ensures accurate information is provided based on the selected institution.
+
+ backend/main.py                                  |  31 +++---
+ frontend/User/src/components/ChatInterface.jsx   |  53 +++++++++-
+ frontend/User/src/components/CollegeSelector.jsx | 121 +++++++++++++++++++++++
+ frontend/User/src/services/api.js                |   6 +-
+ 4 files changed, 197 insertions(+), 14 deletions(-)
+
+commit 94a7b55719d34ff572e1cc50bad2e2c333595786
+Merge: ad9c579 aad1f13
+Author: Madhav Javia <167341985+madhav2710@users.noreply.github.com>
+Date:   Sat Jan 24 18:48:58 2026 +0530
+
+    Merge pull request #1 from madhav2710/Madhav
+    
+    Add chat history sidebar and improve chat UI
+
+commit aad1f138ac3da14f749defdc32e7c8be91ae891d
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Sat Jan 24 18:46:30 2026 +0530
+
+    Add chat history sidebar and improve chat UI
+    
+    Introduces a ChatHistorySidebar component for viewing and managing past conversations, updates ChatInterface to support loading messages from selected conversations, and refactors the main App layout for better navigation and user experience. Backend changes include new endpoints for fetching user profiles and conversation messages, improved signup flow with email confirmation, and enhanced error handling for RAG chat responses.
+
+ backend/main.py                                    | 305 ++++++++++++-----
+ frontend/User/src/App.jsx                          | 216 ++++++++----
+ .../User/src/components/ChatHistorySidebar.jsx     | 244 ++++++++++++++
+ frontend/User/src/components/ChatInterface.jsx     | 373 +++++++++++++--------
+ frontend/User/src/components/Login.jsx             | 253 ++++++++------
+ frontend/User/src/components/ProfileCard.jsx       | 189 +++++++++++
+ frontend/User/src/context/AuthContext.jsx          |  46 ++-
+ frontend/User/src/index.css                        | 168 ++++++++++
+ frontend/User/src/services/api.js                  |   9 +
+ 9 files changed, 1408 insertions(+), 395 deletions(-)
+
+commit ad9c5798a7f61325478eabf4c9436e229ae0b45f
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Jan 19 17:18:51 2026 +0530
+
+    Update main.py
+
+ backend/main.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+commit 90e3bdd3230c024231156a8e5c7c5596fc374bab
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Jan 19 17:17:09 2026 +0530
+
+    Add guest chat and user signup with college selection
+    
+    Implemented anonymous guest chat endpoint and frontend fallback for unauthenticated users. Added user signup flow with college selection, including backend endpoints and frontend UI updates. Refactored login/signup modal, updated AuthContext and API service to support signup, college selection, and improved chat routing based on authentication state.
+
+ DEV_NOTES.ipynb                                |  18 +++
+ backend/main.py                                | 165 ++++++++++++++++++++++++
+ frontend/User/src/App.jsx                      |  48 +++++--
+ frontend/User/src/components/ChatInterface.jsx |   3 +-
+ frontend/User/src/components/Login.jsx         | 171 ++++++++++++++++++++-----
+ frontend/User/src/context/AuthContext.jsx      |  17 ++-
+ frontend/User/src/services/api.js              |  45 +++++--
+ 7 files changed, 410 insertions(+), 57 deletions(-)
+
+commit 48d3787317474f9ded2bc076b62a8a8e8a314ae9
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Mon Jan 19 17:13:51 2026 +0530
+
+    Enhance RAG config, fallback, and error handling
+    
+    Added a comprehensive configuration management system (config.py) with validation, environment variable support, and dynamic updates. Improved basic_chat.py fallback responses for better user experience and more informative feedback. Refactored rag.py to use centralized config, added robust error handling, circuit breaker logic, and enhanced logging for all RAG operations. Added new database migration scripts for vector storage and message metadata. Updated related tests and frontend API integration.
+
+ backend/app/core/basic_chat.py                     |  192 ++-
+ backend/app/core/config.py                         |  643 +++++++
+ backend/app/core/rag.py                            | 1794 +++++++++++++++++---
+ backend/main.py                                    |  862 +++++++++-
+ .../migrations/004_vector_storage_enhancements.sql |  223 +++
+ backend/migrations/005_add_messages_metadata.sql   |   27 +
+ backend/migrations/006_fix_messages_table.sql      |   67 +
+ .../007_add_missing_updated_at_column.sql          |  113 ++
+ backend/tests/test_chat.py                         |  165 +-
+ backend/tests/test_rag.py                          |  312 +++-
+ frontend/Admin/src/App.jsx                         |  154 +-
+ frontend/Admin/src/services/api.js                 |    7 +
+ frontend/User/src/components/ChatInterface.jsx     |  174 +-
+ 13 files changed, 4308 insertions(+), 425 deletions(-)
+
+commit 3699dc26f408f6a8961d6b66a98241e083a1c4fe
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Jan 19 16:15:34 2026 +0530
+
+    Improve file validation and login error handling
+    
+    File validation for PDFs now skips advanced checks if pypdf is not installed, preventing unnecessary upload failures. Login error handling preserves explicit HTTPExceptions and returns a generic error message for unexpected failures, improving user feedback and robustness.
+
+ backend/main.py | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
+
+commit 67216a6b45c148221765aa394818a3a27da40dc6
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Jan 19 15:37:40 2026 +0530
+
+    Add superadmin CRUD for colleges and admins
+    
+    Implemented full CRUD endpoints for superadmin to manage colleges and college admins in the backend, including models and error handling. Updated environment variable loading to support both .env and _env files. Extended frontend college form and logic to support new college fields (code, description, logo_url, is_active) and synchronize with backend changes.
+
+ backend/_env                     |  25 +++
+ backend/app/core/database.py     |  14 +-
+ backend/main.py                  | 333 ++++++++++++++++++++++++++++++++++++++-
+ frontend/Super admin/src/App.jsx |  78 ++++++++-
+ 4 files changed, 441 insertions(+), 9 deletions(-)
+
+commit 01e152f49bdbbb22d5bbadb50bb511a15d24ade8
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Mon Jan 12 17:04:43 2026 +0530
+
+    Refactor API usage and improve document upload logic
+    
+    Replaces direct fetch calls with centralized API service modules in Admin and User frontends, improving maintainability and environment configuration. Updates backend document upload logic to check for duplicates only among active documents and verifies file existence in storage. Adds and fixes database migration scripts for foreign key constraints and idempotency. Removes document delete and action menu buttons from Admin UI, updates tests for new UI, and ensures consistent API base URL usage via environment variables.
+
+ backend/main.py                                    |  59 ++--
+ .../migrations/002_admin_platform_enhancements.sql |  22 +-
+ backend/migrations/003_robustness_improvements.sql |   4 +
+ .../migrations/004_fix_uploaded_by_constraint.sql  |  13 +
+ frontend/Admin/src/App.jsx                         |  91 ++----
+ frontend/Admin/src/App.test.jsx                    | 329 +++++++++++++++++++++
+ frontend/Admin/src/services/api.js                 | 104 +++++++
+ frontend/Super admin/src/context/AuthContext.jsx   |   2 +-
+ frontend/Super admin/src/services/api.js           |   2 +-
+ frontend/User/src/components/ChatInterface.jsx     |  26 +-
+ frontend/User/src/context/AuthContext.jsx          |  14 +-
+ frontend/User/src/services/api.js                  |  99 +++++++
+ 12 files changed, 641 insertions(+), 124 deletions(-)
+
+commit 4c8b7300d63a244ddbc3ae3a153549307e656253
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Jan 12 14:56:58 2026 +0530
+
+    Add Super Admin dashboard and APIs
+    
+    Introduces Super Admin APIs in backend for global stats, admin and college management, and document logs. Updates frontend with a new Super Admin dashboard, admin/college CRUD, document log, and supporting API service. Improves environment variable handling for Supabase client initialization.
+
+ backend/__init__.py                      |   1 +
+ backend/app/__init__.py                  |   1 +
+ backend/app/core/__init__.py             |   1 +
+ backend/app/core/database.py             |  15 +-
+ backend/main.py                          | 299 +++++++++++-
+ frontend/Super admin/src/App.jsx         | 759 +++++++++++++++++++++++++++++--
+ frontend/Super admin/src/services/api.js | 143 ++++++
+ 7 files changed, 1179 insertions(+), 40 deletions(-)
+
+commit 8274c3f0cf6db2263bbad443c7e72ef07af82073
+Merge: 3c46ec6 299161a
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Jan 5 17:18:31 2026 +0530
+
+    Merge branch 'main' of https://github.com/madhav2710/2526_sdp8_College_info_assistant
+
+commit 3c46ec667c7de4ca5b91d0c3a819d33190ffb7f1
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Jan 5 17:18:12 2026 +0530
+
+    Refactor Super Admin panel to use context and modular components
+    
+    Replaces in-component authentication and mock data with a new AuthContext for API-based authentication, and introduces a PendingDocuments component for handling document approvals. Removes legacy admin and college management UI, focusing the panel on pending document workflows. Updates navigation and cleans up the App component for improved maintainability and separation of concerns.
+
+ frontend/Super admin/src/App.jsx                   | 1519 ++------------------
+ .../src/components/PendingDocuments.jsx            |  280 ++++
+ frontend/Super admin/src/context/AuthContext.jsx   |   85 ++
+ frontend/Super admin/src/main.jsx                  |    6 +-
+ 4 files changed, 461 insertions(+), 1429 deletions(-)
+
+commit 299161a679bbbd7b3f66044f76645f00e5d994fc
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Mon Jan 5 17:17:35 2026 +0530
+
+    Add workflow management and enhance document processing
+    
+    Introduces workflow validation and status logging utilities, basic chat fallback, and robust file validation for document uploads. Adds endpoints for scheduling and manually triggering document processing, improves status transition handling, and logs status changes. Updates models and migrations to support new workflow and notification features.
+
+ backend/.gitignore                                 |  58 +-
+ backend/app/core/basic_chat.py                     |  70 ++
+ backend/app/core/notifications.py                  | 594 ++++++++---------
+ backend/app/core/rag.py                            |   6 +-
+ backend/app/core/workflow.py                       |  68 ++
+ backend/app/models/__init__.py                     |  32 +-
+ backend/app/models/notification.py                 | 118 ++--
+ backend/main.py                                    | 432 ++++++++++++-
+ backend/migrations/001_initial_schema.sql          | 182 +++---
+ .../migrations/002_admin_platform_enhancements.sql | 708 ++++++++++-----------
+ backend/migrations/003_robustness_improvements.sql | 112 ++++
+ backend/migrations/README.md                       | 165 -----
+ backend/run_migration.py                           | 186 +++---
+ 13 files changed, 1600 insertions(+), 1131 deletions(-)
+
+commit cc61b4cb1d6ce1af779fef0041aac2bb0daa83e9
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Mon Jan 5 17:13:42 2026 +0530
+
+    Add Supabase vector store integration to RAG notebook
+    
+    This update adds Supabase as a vector store for document embeddings, including configuration for Supabase client, direct RPC retrieval, and improved chunking and retrieval logic. It also updates the LLM model and API key usage, and provides a new retrieval function that queries Supabase directly for relevant document chunks.
+
+ Learning/RAG/improved_rag_notebook.ipynb | 1230 +++++++++++++++++++++++++++++-
+ 1 file changed, 1201 insertions(+), 29 deletions(-)
+
+commit 7e2b0e18b362893ff6f3b99c944441165088dcd4
+Merge: af2de68 47e3004
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Sun Jan 4 23:12:11 2026 +0530
+
+    Merge branch 'main' of https://github.com/madhav2710/2526_sdp8_College_info_assistant
+
+commit af2de689cd69f31407f855b8c553d6347eb2da44
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Sun Jan 4 23:10:55 2026 +0530
+
+    created super admin ui
+
+ .DS_Store                               |  Bin 6148 -> 14340 bytes
+ frontend/Super admin/.gitignore         |   25 +
+ frontend/Super admin/README.md          |   59 +
+ frontend/Super admin/index.html         |   14 +
+ frontend/Super admin/package-lock.json  | 2613 +++++++++++++++++++++++++++++++
+ frontend/Super admin/package.json       |   26 +
+ frontend/Super admin/postcss.config.js  |    7 +
+ frontend/Super admin/src/App.jsx        | 1592 +++++++++++++++++++
+ frontend/Super admin/src/index.css      |    4 +
+ frontend/Super admin/src/main.jsx       |   11 +
+ frontend/Super admin/tailwind.config.js |   12 +
+ frontend/Super admin/vite.config.js     |    8 +
+ 12 files changed, 4371 insertions(+)
+
+commit 47e3004bc1f89af146c71d3cfcb69035ca5a0514
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sun Jan 4 22:28:46 2026 +0530
+
+    Improve RAG chunking, retrieval, and chat integration
+    
+    Enhanced the RAG pipeline with better chunking (overlapping, sentence-aware), multi-chunk retrieval with similarity filtering, and improved prompt formatting for structured responses. Backend now stores and retrieves multiple relevant chunks per query, and the chat API returns assistant responses with document sources. The frontend displays sources for assistant messages and handles the new response format.
+
+ .gitignore                                     |   8 +
+ Learning/RAG/improved_rag_notebook.ipynb       | 227 ++++++++++++++++++++
+ backend/app/core/rag.py                        | 286 ++++++++++++++++++++++++-
+ backend/main.py                                |  57 +++--
+ frontend/User/src/components/ChatInterface.jsx |  21 +-
+ 5 files changed, 566 insertions(+), 33 deletions(-)
+
+commit fa9538ae81461604584397b5bac725150d58330b
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sun Jan 4 18:20:03 2026 +0530
+
+    Add notification and approval system for documents
+    
+    Implements a notification system with models, core logic, and endpoints for document workflow events. Adds document approval and rejection endpoints for super admins, enhances document upload and processing flows to trigger notifications, and introduces new database migrations for notifications, document approvals, and related indexes. Cleans up debug output, enforces stricter environment variable checks, and removes obsolete scripts and test files.
+
+ .DS_Store                                          | Bin 6148 -> 0 bytes
+ .coverage                                          | Bin 53248 -> 0 bytes
+ .gitignore                                         |   8 +
+ Learning/.DS_Store                                 | Bin 6148 -> 0 bytes
+ backend/.gitignore                                 |  13 +
+ backend/app/core/auth.py                           |   2 -
+ backend/app/core/database.py                       |   2 +-
+ backend/app/core/notifications.py                  | 298 +++++++++++
+ backend/app/core/rag.py                            | 114 +++-
+ backend/app/models/__init__.py                     |  17 +
+ backend/app/models/notification.py                 |  60 +++
+ backend/check_storage.py                           |  54 --
+ backend/inspect_schema.py                          |  44 --
+ backend/main.py                                    | 595 ++++++++++++++++++++-
+ .../migrations/002_admin_platform_enhancements.sql | 355 ++++++++++++
+ backend/migrations/README.md                       | 165 ++++++
+ backend/run_migration.py                           |  94 ++++
+ backend/seed_college_admin.py                      |  89 ---
+ backend/seed_super_admin.py                        |  82 ---
+ backend/seed_user.py                               |  89 ---
+ backend/test_auth_flow.py                          |  35 --
+ backend/test_db.py                                 |  29 -
+ backend/tests/test_admin.py                        | 409 +++++++++++++-
+ 23 files changed, 2096 insertions(+), 458 deletions(-)
+
+commit 89d9ebaf20aa615c833782ce31fb1baa921e1311
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 12:28:33 2026 +0530
+
+    Delete conductor/tracks/mvp_auth_rag_20260103 directory
+
+ conductor/tracks/mvp_auth_rag_20260103/plan.md | 57 --------------------------
+ 1 file changed, 57 deletions(-)
+
+commit 9a833ad6f5c23a535e3df0c408df6f1ec40d3624
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 04:31:32 2026 +0530
+
+    Add admin utilities and improve document upload flow
+    
+    Added backend scripts for storage checks, schema inspection, seeding college admin, and testing auth flow. Improved document upload in main.py to use service key for Supabase Storage and DB, added background RAG processing, and updated college admin dashboard link in frontend. Increased Supabase client timeout for large uploads and enhanced debug logging for authentication.
+
+ backend/app/core/auth.py      |  2 +
+ backend/app/core/database.py  | 13 +++++--
+ backend/app/core/rag.py       |  7 ++++
+ backend/check_storage.py      | 54 ++++++++++++++++++++++++++
+ backend/inspect_schema.py     | 44 +++++++++++++++++++++
+ backend/main.py               | 70 ++++++++++++++++++++++++++++------
+ backend/seed_college_admin.py | 89 +++++++++++++++++++++++++++++++++++++++++++
+ backend/test_auth_flow.py     | 35 +++++++++++++++++
+ frontend/Admin/vite.config.js |  2 +-
+ frontend/User/src/App.jsx     | 36 ++++++++++++++++-
+ 10 files changed, 335 insertions(+), 17 deletions(-)
+
+commit e5c347e75bec2eafcb01d3f9c948c6b9b34acc78
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 03:32:05 2026 +0530
+
+    feat(admin): Implement Admin Dashboard frontend for document management
+
+ .coverage                                      |  Bin 0 -> 53248 bytes
+ .gitignore                                     |    4 +
+ backend/main.py                                |   15 +
+ backend/migrations/001_initial_schema.sql      |   19 +
+ conductor/tracks/mvp_auth_rag_20260103/plan.md |    9 +-
+ frontend/Admin/package-lock.json               | 1325 ++++++++++++++++++++++--
+ frontend/Admin/package.json                    |   19 +-
+ frontend/Admin/src/App.jsx                     |  201 +++-
+ frontend/Admin/src/App.test.jsx                |  151 +++
+ frontend/Admin/src/setupTests.js               |    1 +
+ frontend/Admin/vite.config.js                  |   11 +-
+ 11 files changed, 1654 insertions(+), 101 deletions(-)
+
+commit a48ba959ba78b7617de6c479561d4d6d33a03236
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 03:03:36 2026 +0530
+
+    feat(rag): Implement basic RAG processing (extraction + embedding)
+
+ backend/app/core/rag.py                        | 69 ++++++++++++++++++++++++++
+ backend/tests/test_rag.py                      | 58 ++++++++++++++++++++++
+ conductor/tracks/mvp_auth_rag_20260103/plan.md |  6 +--
+ 3 files changed, 130 insertions(+), 3 deletions(-)
+
+commit 251a9785032ab54002562d2b8e969e81f958b7fe
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 03:00:32 2026 +0530
+
+    feat(admin): Implement document upload backend with tests
+
+ backend/app/core/auth.py                       | 46 +++++++++++++
+ backend/app/core/database.py                   | 22 ++++++
+ backend/main.py                                | 94 ++++++++++++++------------
+ backend/tests/test_admin.py                    | 89 ++++++++++++++++++++++++
+ conductor/tracks/mvp_auth_rag_20260103/plan.md | 58 ++++++++++++++++
+ 5 files changed, 265 insertions(+), 44 deletions(-)
+
+commit 5aad23ae79050b907c550dd1cb1d94d98c95fb01
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 02:51:06 2026 +0530
+
+    feat(chat): Functional student chat with history and mock response
+
+ backend/main.py                                |  80 ++++++++++-------
+ backend/seed_user.py                           |  47 ++++++++--
+ backend/tests/test_chat.py                     |  68 ++++++++++++++
+ frontend/User/src/App.jsx                      |   6 +-
+ frontend/User/src/components/ChatInterface.jsx | 118 +++++++++++++++++++++++++
+ 5 files changed, 274 insertions(+), 45 deletions(-)
+
+commit 8f9b4891ffc67edec564c313324a0bd6c962cf8c
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 02:29:46 2026 +0530
+
+    feat(auth): End-to-end authentication and role-based access control
+
+ backend/main.py                           | 43 ++++++++++++++--
+ backend/seed_super_admin.py               | 82 +++++++++++++++++++++++++++++++
+ backend/seed_user.py                      | 58 ++++++++++++++++++++++
+ backend/tests/test_auth.py                | 47 ++++++++++++++++++
+ frontend/User/src/App.jsx                 | 49 ++++++++++++++----
+ frontend/User/src/components/Login.jsx    | 56 +++++++++++++++++++++
+ frontend/User/src/context/AuthContext.jsx | 54 ++++++++++++++++++++
+ 7 files changed, 376 insertions(+), 13 deletions(-)
+
+commit 1b8aab2832ed3544be4f7a085b660fee3cc0d78e
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 02:10:24 2026 +0530
+
+    feat(infra): Initial database schema and backend project initialization
+
+ backend/migrations/001_initial_schema.sql | 72 +++++++++++++++++++++++++++++++
+ backend/tests/test_app_init.py            | 14 ++++++
+ 2 files changed, 86 insertions(+)
+
+commit d7ab5a4ce1996cc0d21b50714ba851403cff54af
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Sat Jan 3 01:43:22 2026 +0530
+
+    chore: add .gitignore
+
+ .gitignore | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+commit 3a390466346ef25b9a2ca468152d48417014b85f
+Merge: 92052b5 d6a667f
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Dec 22 17:26:07 2025 +0530
+
+    Merge branch 'main' of https://github.com/madhav2710/2526_sdp8_College_info_assistant
+
+commit 92052b55b56ce12dcc4c6f1731b472565b431094
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Dec 22 17:25:45 2025 +0530
+
+    Add RAG document extraction and embedding notebook
+    
+    Introduces a comprehensive Jupyter notebook for extracting text from PDFs, DOCX, and images, uploading to Supabase Storage, and generating embeddings using LangChain and Gemini. Also adds a working retrieval notebook and a new SuperAdminPanel component in the frontend. Updates App.jsx to integrate the new component.
+
+ Learning/RAG/doc_txt_extraction_embed.ipynb | 1147 +++++++++++++++++++++++++++
+ Learning/RAG/working_retrival.ipynb         |  275 +++++++
+ frontend/src/App.jsx                        |   24 +
+ frontend/src/components/SuperAdminPanel.jsx |  446 +++++++++++
+ 4 files changed, 1892 insertions(+)
+
+commit d6a667f3eefe6f67c1269c031ba4f27ee27853bb
+Merge: dbde266 ab9e68a
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Dec 22 17:24:43 2025 +0530
+
+    Merge branch 'main' of https://github.com/madhav2710/2526_sdp8_College_info_assistant
+
+commit ab9e68a706e5656b7083a97adcc232969bb95c92
+Merge: f25ac87 5264da9
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Mon Dec 22 17:23:19 2025 +0530
+
+    Merge branch 'main' of https://github.com/madhav2710/2526_sdp8_College_info_assistant
+
+commit f25ac87561142d3f138ce24cd5fd6ca981b1d635
+Author: VISHV44 <145194583+VISHV44@users.noreply.github.com>
+Date:   Mon Dec 22 17:23:08 2025 +0530
+
+    Created Admin UI and moved chat section to /frontend/User
+
+ .DS_Store                                          |  Bin 6148 -> 6148 bytes
+ frontend/Admin/index.html                          |   14 +
+ frontend/Admin/package-lock.json                   | 2676 ++++++++++++++++++++
+ frontend/Admin/package.json                        |   24 +
+ frontend/Admin/postcss.config.cjs                  |    8 +
+ frontend/Admin/src/App.jsx                         |  550 ++++
+ frontend/Admin/src/index.css                       |   10 +
+ frontend/Admin/src/main.jsx                        |   12 +
+ frontend/Admin/tailwind.config.cjs                 |   10 +
+ frontend/Admin/vite.config.js                      |   11 +
+ frontend/{ => User}/README.md                      |    0
+ frontend/{ => User}/index.html                     |    0
+ frontend/{ => User}/package-lock.json              |    0
+ frontend/{ => User}/package.json                   |    0
+ frontend/{ => User}/postcss.config.js              |    0
+ frontend/{ => User}/src/App.jsx                    |    0
+ frontend/{ => User}/src/components/demo.jsx        |    0
+ frontend/{ => User}/src/components/ui/button.jsx   |    0
+ .../{ => User}/src/components/ui/prompt-input.jsx  |    0
+ frontend/{ => User}/src/index.css                  |    0
+ frontend/{ => User}/src/lib/utils.js               |    0
+ frontend/{ => User}/src/main.jsx                   |    0
+ frontend/{ => User}/tailwind.config.js             |    0
+ frontend/{ => User}/vite.config.js                 |    0
+ 24 files changed, 3315 insertions(+)
+
+commit dbde26651a5867b633e5e38f5259e2736bd3f415
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Dec 22 17:23:06 2025 +0530
+
+    LAB04
+
+ backend/.env                             |   8 +--
+ backend/.gitignore                       |  16 +++++
+ backend/__pycache__/main.cpython-313.pyc | Bin 3051 -> 4924 bytes
+ backend/main.py                          | 107 ++++++++++++++++++++++---------
+ frontend/src/components/demo.jsx         |  32 +++++++--
+ 5 files changed, 123 insertions(+), 40 deletions(-)
+
+commit 5264da9085af99a9a645b37bb59a80abae6f8507
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Dec 22 17:15:22 2025 +0530
+
+    Add .gitignore and stop tracking sensitive/generated files
+
+ backend/.env                             |   5 -
+ backend/.gitignore                       | 155 +++++++++++++++++++++++++++++++
+ backend/__pycache__/main.cpython-313.pyc | Bin 3051 -> 0 bytes
+ 3 files changed, 155 insertions(+), 5 deletions(-)
+
+commit fba963a62777be3053ab260ef0f20d2702f771b4
+Merge: d5d5d25 81a1071
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Dec 15 17:21:50 2025 +0530
+
+    Merge branch 'main' of https://github.com/madhav2710/2526_sdp8_College_info_assistant
+
+commit d5d5d252b7159d17a4c482b9964f5c270101b363
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Dec 15 17:21:38 2025 +0530
+
+    Replace ChromaDB example with LangChain learning notebook
+    
+    Removed the Chromadb_example.ipynb and added LangChain_Learning.ipynb under the Learning directory. This updates the learning materials to focus on LangChain instead of ChromaDB.
+
+ Learning/Chromadb/Chromadb_example.ipynb    |  588 -------------
+ Learning/LangChain/LangChain_Learning.ipynb | 1232 +++++++++++++++++++++++++++
+ 2 files changed, 1232 insertions(+), 588 deletions(-)
+
+commit 81a10716530033081239a32209b66745592e87e4
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Dec 15 17:19:45 2025 +0530
+
+    Add FastAPI backend with database connection
+    
+    Introduced a FastAPI application in main.py with endpoints for chat messages and student info. Added environment variable configuration in .env for PostgreSQL connection, and included test_db.py for verifying database connectivity. Also added compiled Python cache file.
+
+ backend/.env                             |   5 +++
+ backend/__pycache__/main.cpython-313.pyc | Bin 0 -> 3051 bytes
+ backend/main.py                          |  69 +++++++++++++++++++++++++++++++
+ backend/test_db.py                       |  29 +++++++++++++
+ 4 files changed, 103 insertions(+)
+
+commit a7c939578e66bee5379890bad1d56e331697b3c6
+Author: Karthiya Yash Kiranbhai <160919026+NotYash1066@users.noreply.github.com>
+Date:   Mon Dec 15 15:33:39 2025 +0530
+
+    Initialize React frontend with shadcn/ui and Tailwind
+    
+    Set up a new React application in the frontend directory using shadcn/ui component structure and Tailwind CSS. Includes initial project files, configuration, reusable UI components, utility functions, and setup documentation.
+
+ frontend/.gitignore                         |   25 +
+ frontend/README.md                          |   71 +
+ frontend/index.html                         |   14 +
+ frontend/package-lock.json                  | 2655 +++++++++++++++++++++++++++
+ frontend/package.json                       |   26 +
+ frontend/postcss.config.js                  |    7 +
+ frontend/src/App.jsx                        |   16 +
+ frontend/src/components/demo.jsx            |   49 +
+ frontend/src/components/ui/button.jsx       |   52 +
+ frontend/src/components/ui/prompt-input.jsx |   57 +
+ frontend/src/index.css                      |   60 +
+ frontend/src/lib/utils.js                   |    7 +
+ frontend/src/main.jsx                       |   10 +
+ frontend/tailwind.config.js                 |   46 +
+ frontend/vite.config.js                     |   13 +
+ 15 files changed, 3108 insertions(+)
+
+commit ad41c77179775925d42467b2ac55a28ad20a427c
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Dec 8 17:29:46 2025 +0530
+
+    Add ChromaDB demo notebook and .DS_Store files
+    
+    Added a new Jupyter notebook demonstrating basic usage of ChromaDB, including collection creation, record addition, semantic search, metadata filtering, and upsert operations. Also added .DS_Store files to the root and Learning directories.
+
+ .DS_Store                                | Bin 0 -> 6148 bytes
+ Learning/.DS_Store                       | Bin 0 -> 6148 bytes
+ Learning/Chromadb/Chromadb_example.ipynb | 588 +++++++++++++++++++++++++++++++
+ 3 files changed, 588 insertions(+)
+
+commit 31bba5448f6d2a0c6c2bc1fbb07b1f394ab7fc72
+Author: Madhav Javia <madhavjavia777@gmail.com>
+Date:   Mon Dec 8 17:25:10 2025 +0530
+
+    Add project README with overview and features
+    
+    Initial README.md provides a comprehensive overview of the CollegeInfo-Agent project, including its RAG-based architecture, technology stack, key features, admin roles, and student Q&A flow. This documentation helps onboard contributors and users by outlining system capabilities and usage.
+
+ README.md | 104 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 104 insertions(+)
