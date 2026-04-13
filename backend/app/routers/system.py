@@ -7,7 +7,6 @@ from app.services.system_service import (
     get_configuration_status,
     get_current_system_health,
     get_root_payload,
-    get_student_payload,
     list_public_colleges as list_public_colleges_payload,
     reset_current_system_health,
     validate_configuration,
@@ -62,8 +61,3 @@ async def list_public_colleges():
 @router.get("/")
 async def root():
     return get_root_payload()
-
-
-@router.get("/student/{student_id}")
-async def get_student(student_id: int):
-    return get_student_payload(student_id=student_id)

@@ -105,13 +105,11 @@ def list_public_colleges() -> dict[str, list[dict[str, Any]]]:
 
 
 def get_root_payload() -> dict[str, str]:
-    return {"message": "Welcome to Our Application!"}
+    from app.core.config import get_system_config
 
-
-def get_student_payload(student_id: int) -> dict[str, Any]:
+    config = get_system_config()
     return {
-        "student_id": student_id,
-        "name": "John Doe",
-        "age": 21,
-        "Query": "Sample Query",
+        "app": config.application.app_name,
+        "status": "ok",
+        "version": config.application.app_version,
     }

@@ -68,29 +68,18 @@ async def mock_student_user():
 
 def test_root_route():
     with patch("app.routers.system.get_root_payload") as mock_root_payload:
-        mock_root_payload.return_value = {"message": "Welcome to Our Application!"}
+        mock_root_payload.return_value = {
+            "app": "College Platform API",
+            "status": "ok",
+            "version": "1.0.0",
+        }
         response = client.get("/")
 
     assert response.status_code == 200
-    assert response.json() == {"message": "Welcome to Our Application!"}
-
-
-def test_get_student_route():
-    with patch("app.routers.system.get_student_payload") as mock_get_student_payload:
-        mock_get_student_payload.return_value = {
-            "student_id": 7,
-            "name": "John Doe",
-            "age": 21,
-            "Query": "Sample Query",
-        }
-        response = client.get("/student/7")
-
-    assert response.status_code == 200
     assert response.json() == {
-        "student_id": 7,
-        "name": "John Doe",
-        "age": 21,
-        "Query": "Sample Query",
+        "app": "College Platform API",
+        "status": "ok",
+        "version": "1.0.0",
     }
 
 
