@@ -435,4 +435,10 @@ def test_trigger_manual_rag_processing_success():
     assert body["document"]["triggered_by"] == "admin-user-id"
     assert "triggered_at" in body["document"]
     mock_log_status_change.assert_called_once()
-    assert mock_trigger_rag.await_count == 1
+    mock_trigger_rag.assert_awaited_once_with(
+        document_id,
+        "catalog.txt",
+        "admin-user-id",
+        "manual_trigger",
+        "manual",
+    )

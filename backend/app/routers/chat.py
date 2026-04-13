@@ -27,8 +27,8 @@ async def guest_chat(request: GuestChatRequest):
 
 
 @router.get("/chat/history/")
-async def get_chat_history(user_id: UUID):
-    return await get_chat_history_for_user(user_id=str(user_id))
+async def get_chat_history(current_user: dict = Depends(get_current_user)):
+    return await get_chat_history_for_user(user_id=current_user["user_id"])
 
 
 @router.get("/chat/conversation/{conversation_id}/messages")

@@ -1169,6 +1169,8 @@ async def trigger_manual_rag_processing_for_admin(
             str(document_id),
             filename,
             current_user["user_id"],
+            "manual_trigger",
+            "manual",
         )
 
         logger.info(

@@ -110,11 +110,23 @@ async def create_chat_response(
     message: Any, current_user: dict[str, Any]
 ) -> dict[str, Any]:
     user_id_str = str(message.user_id)
+    authenticated_user_id = str(current_user["user_id"])
+
+    if authenticated_user_id != user_id_str:
+        logger.warning(
+            "User %s attempted to send message as user %s",
+            authenticated_user_id,
+            message.user_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to send messages for this user",
+        )
 
     try:
-        check_and_update_rate_limit(user_id_str)
+        check_and_update_rate_limit(authenticated_user_id)
     except ValueError as exc:
-        logger.warning("Rate limit exceeded for user %s", user_id_str)
+        logger.warning("Rate limit exceeded for user %s", authenticated_user_id)
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     logger.info(
@@ -148,16 +160,6 @@ async def create_chat_response(
                     status_code=400, detail="User is not associated with a college"
                 )
 
-            if current_user["user_id"] != user_id_str:
-                logger.warning(
-                    "User %s attempted to send message as user %s",
-                    current_user["user_id"],
-                    message.user_id,
-                )
-                raise HTTPException(
-                    status_code=403,
-                    detail="Not authorized to send messages for this user",
-                )
         except HTTPException:
             raise
         except Exception as exc:

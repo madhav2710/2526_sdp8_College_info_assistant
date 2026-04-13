@@ -224,18 +224,28 @@ def test_guest_chat_falls_back_to_basic_response():
     )
 
 
-def test_get_chat_history():
-    user_id = str(uuid4())
-    mock_supabase = MagicMock()
-    mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value = SimpleNamespace(
-        data=[{"id": "conv-1", "title": "First Chat"}]
-    )
+def test_get_chat_history_requires_authentication():
+    response = client.get("/chat/history/")
 
-    with patch("app.services.chat_service.supabase", mock_supabase):
-        response = client.get(f"/chat/history/?user_id={user_id}")
+    assert response.status_code == 401
+
+
+def test_get_chat_history_uses_current_user():
+    app.dependency_overrides[get_current_user] = mock_current_user
+
+    with patch(
+        "app.routers.chat.get_chat_history_for_user",
+        new=AsyncMock(return_value=[{"id": "conv-1", "title": "First Chat"}]),
+    ) as mock_get_chat_history:
+        response = client.get("/chat/history/")
+
+    app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json() == [{"id": "conv-1", "title": "First Chat"}]
+    mock_get_chat_history.assert_awaited_once_with(
+        user_id="11111111-1111-1111-1111-111111111111"
+    )
 
 
 def test_get_conversation_messages():
@@ -287,6 +297,30 @@ def test_get_conversation_messages():
             }
         ],
     }
+
+
+def test_create_chat_rejects_mismatched_user_before_rate_limit():
+    app.dependency_overrides[get_current_user] = mock_current_user
+    clear_rate_limit_cache()
+    conv_id = str(uuid4())
+
+    with patch("app.services.chat_service.check_and_update_rate_limit") as mock_rate_limit:
+        response = client.post(
+            "/chat/",
+            json={
+                "conversation_id": conv_id,
+                "user_id": str(uuid4()),
+                "role": "user",
+                "content": "Hello",
+            },
+        )
+
+    app.dependency_overrides.clear()
+    clear_rate_limit_cache()
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Not authorized to send messages for this user"}
+    mock_rate_limit.assert_not_called()
 
 
 def test_chat_rate_limiting():
