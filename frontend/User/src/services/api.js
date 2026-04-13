@@ -1,17 +1,21 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-// Get JWT token from localStorage
-const getToken = () => {
-  const user = localStorage.getItem('user');
-  if (user) {
-    try {
-      const userData = JSON.parse(user);
-      return userData.token;
-    } catch {
-      return null;
-    }
+const getStoredUser = () => {
+  const storedUser = localStorage.getItem('user') || sessionStorage.getItem('user');
+
+  if (!storedUser) {
+    return null;
   }
-  return null;
+
+  try {
+    return JSON.parse(storedUser);
+  } catch {
+    return null;
+  }
+};
+
+const getToken = () => {
+  return getStoredUser()?.token || null;
 };
 
 // API request helper
@@ -104,6 +108,12 @@ export const userAPI = {
 
   getConversationMessages: async (conversationId) => {
     return apiRequest(`/chat/conversation/${conversationId}/messages`);
+  },
+
+  deleteConversation: async (conversationId) => {
+    return apiRequest(`/chat/conversation/${conversationId}`, {
+      method: 'DELETE',
+    });
   },
 
   // Notifications

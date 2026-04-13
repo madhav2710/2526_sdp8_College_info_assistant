@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, UserPlus, Mail, Lock, User, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
+import { LogIn, UserPlus, Mail, Lock, User, CheckCircle, AlertCircle } from 'lucide-react';
 
 const Login = ({ onSuccess }) => {
     const [mode, setMode] = useState('login');
     const [fullName, setFullName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [rememberMe, setRememberMe] = useState(false);
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -20,7 +21,7 @@ const Login = ({ onSuccess }) => {
         
         try {
             if (mode === 'login') {
-                await login(email, password);
+                await login(email, password, rememberMe);
                 if (onSuccess) onSuccess();
             } else {
                 await signup(email, password, fullName, null);
@@ -124,6 +125,18 @@ const Login = ({ onSuccess }) => {
                         onChange={(e) => setPassword(e.target.value)}
                     />
                 </div>
+
+                {mode === 'login' && (
+                    <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-colors hover:border-slate-300">
+                        <input
+                            type="checkbox"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500/30"
+                        />
+                        <span className="font-medium">Remember me on this device</span>
+                    </label>
+                )}
                 
                 <button
                     type="submit"
@@ -159,13 +172,14 @@ const Login = ({ onSuccess }) => {
                     {mode === 'login' ? (
                         <>
                             Don&apos;t have an account?{' '}
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setMode('signup');
-                                    setError('');
-                                    setSuccessMessage('');
-                                }}
+                                 <button
+                                     type="button"
+                                     onClick={() => {
+                                         setMode('signup');
+                                         setRememberMe(false);
+                                         setError('');
+                                         setSuccessMessage('');
+                                     }}
                                 className="font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
                             >
                                 Sign up
@@ -174,13 +188,14 @@ const Login = ({ onSuccess }) => {
                     ) : (
                         <>
                             Already have an account?{' '}
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setMode('login');
-                                    setError('');
-                                    setSuccessMessage('');
-                                }}
+                                 <button
+                                     type="button"
+                                     onClick={() => {
+                                         setMode('login');
+                                         setRememberMe(false);
+                                         setError('');
+                                         setSuccessMessage('');
+                                     }}
                                 className="font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
                             >
                                 Log in
