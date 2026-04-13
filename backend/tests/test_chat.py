@@ -48,6 +48,9 @@ class _Client:
     def insert(self, *args, **kwargs):
         return self
 
+    def delete(self, *args, **kwargs):
+        return self
+
     def execute(self):
         return types.SimpleNamespace(data=[])
 
@@ -202,12 +205,14 @@ def test_guest_chat_falls_back_to_basic_response():
             return_value=mock_service_client,
         ),
         patch(
+            "app.core.rag.generate_rag_response",
+            new=AsyncMock(side_effect=Exception("RAG unavailable")),
+        ),
+        patch(
             "app.services.chat_service.generate_basic_response",
             new=AsyncMock(return_value=fallback_response),
         ),
-        patch.dict(sys.modules, {}, clear=False),
     ):
-        sys.modules.pop("app.core.rag", None)
         response = client.post(
             "/guest-chat",
             json={"content": "Tell me about admissions"},
@@ -299,12 +304,36 @@ def test_get_conversation_messages():
     }
 
 
+def test_delete_conversation_uses_current_user():
+    app.dependency_overrides[get_current_user] = mock_current_user
+    conversation_id = str(uuid4())
+
+    with patch(
+        "app.routers.chat.delete_conversation_for_user",
+        new=AsyncMock(
+            return_value={"status": "success", "conversation_id": conversation_id}
+        ),
+    ) as mock_delete_conversation:
+        response = client.delete(f"/chat/conversation/{conversation_id}")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "conversation_id": conversation_id}
+    mock_delete_conversation.assert_awaited_once_with(
+        conversation_id=conversation_id,
+        user_id="11111111-1111-1111-1111-111111111111",
+    )
+
+
 def test_create_chat_rejects_mismatched_user_before_rate_limit():
     app.dependency_overrides[get_current_user] = mock_current_user
     clear_rate_limit_cache()
     conv_id = str(uuid4())
 
-    with patch("app.services.chat_service.check_and_update_rate_limit") as mock_rate_limit:
+    with patch(
+        "app.services.chat_service.check_and_update_rate_limit"
+    ) as mock_rate_limit:
         response = client.post(
             "/chat/",
             json={
@@ -319,7 +348,9 @@ def test_create_chat_rejects_mismatched_user_before_rate_limit():
     clear_rate_limit_cache()
 
     assert response.status_code == 403
-    assert response.json() == {"detail": "Not authorized to send messages for this user"}
+    assert response.json() == {
+        "detail": "Not authorized to send messages for this user"
+    }
     mock_rate_limit.assert_not_called()
 
 

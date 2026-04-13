@@ -553,3 +553,42 @@ async def get_conversation_messages_for_user(
             status_code=500,
             detail=f"Failed to get conversation messages: {str(exc)}",
         ) from exc
+
+
+async def delete_conversation_for_user(
+    conversation_id: str, user_id: str
+) -> dict[str, Any]:
+    try:
+        client = get_service_client()
+
+        conv_check = (
+            client.table("conversations")
+            .select("user_id")
+            .eq("id", conversation_id)
+            .execute()
+        )
+        if not conv_check.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conv_check.data[0]["user_id"] != user_id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to delete this conversation"
+            )
+
+        client.table("messages").delete().eq(
+            "conversation_id", conversation_id
+        ).execute()
+        client.table("conversations").delete().eq("id", conversation_id).execute()
+
+        return {
+            "status": "success",
+            "conversation_id": conversation_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to delete conversation: %s", str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete conversation. Please try again.",
+        ) from exc

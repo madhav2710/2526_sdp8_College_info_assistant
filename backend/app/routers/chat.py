@@ -7,6 +7,7 @@ from app.schemas.chat import ChatMessage, GuestChatRequest
 from app.services.chat_service import (
     create_chat_response,
     create_guest_chat_response,
+    delete_conversation_for_user,
     get_chat_history_for_user,
     get_conversation_messages_for_user,
 )
@@ -36,6 +37,16 @@ async def get_conversation_messages(
     conversation_id: UUID, current_user: dict = Depends(get_current_user)
 ):
     return await get_conversation_messages_for_user(
+        conversation_id=str(conversation_id),
+        user_id=current_user["user_id"],
+    )
+
+
+@router.delete("/chat/conversation/{conversation_id}")
+async def delete_conversation(
+    conversation_id: UUID, current_user: dict = Depends(get_current_user)
+):
+    return await delete_conversation_for_user(
         conversation_id=str(conversation_id),
         user_id=current_user["user_id"],
     )
