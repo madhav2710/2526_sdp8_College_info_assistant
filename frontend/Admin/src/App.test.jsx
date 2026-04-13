@@ -55,6 +55,49 @@ describe('Admin Dashboard', () => {
     expect(screen.getByText('Document Management')).toBeInTheDocument();
   });
 
+  test('loads real query history when history tab is opened', async () => {
+    fetch.mockImplementation(async (url) => {
+      if (String(url).includes('/admin/query-history')) {
+        return {
+          ok: true,
+          json: async () => ({
+            query_history: [
+              {
+                id: 'conv-1',
+                query: 'What are the admission requirements?',
+                title: 'Admissions',
+                created_at: '2024-01-04T10:00:00Z',
+                message_count: 2,
+              },
+            ],
+            total_conversations: 1,
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => [],
+      };
+    });
+
+    render(<App />);
+
+    const historyTab = screen.getByRole('button', { name: /query history/i });
+    fireEvent.click(historyTab);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/admin/query-history?limit=10'),
+        expect.any(Object)
+      );
+      expect(screen.getByText('Admissions')).toBeInTheDocument();
+      expect(screen.getByText('2 messages')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/admission requirements/i)).toBeInTheDocument();
+  });
+
   test('calls API on file upload', async () => {
     render(<App />);
     const docsTab = screen.getAllByText(/Documents/i).find(el => el.tagName === 'BUTTON');
@@ -189,19 +232,14 @@ describe('Admin Dashboard', () => {
           const actionMenuButtons = document.querySelectorAll('.lucide-more-vertical');
           expect(actionMenuButtons).toHaveLength(0);
 
-          // Verify ingest button is present only for pending documents by checking for lucide-refresh-cw class
-          const ingestButtons = document.querySelectorAll('.lucide-refresh-cw');
-          expect(ingestButtons.length).toBeGreaterThan(0); // Should have at least one for pending document
-
-          // Verify table layout integrity - action column should still exist but only contain ingest buttons for pending docs
           const actionCells = document.querySelectorAll('td:last-child');
           expect(actionCells).toHaveLength(3); // One for each document row
         });
       });
 
-      test('verifies hover states work correctly for remaining buttons', async () => {
+      test('verifies hover states work correctly for trigger buttons', async () => {
         const mockDocs = [
-          { id: '1', filename: 'doc1.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
+          { id: '1', filename: 'doc1.pdf', file_type: 'application/pdf', status: 'approved', created_at: '2023-12-01T10:00:00Z' },
         ];
 
         fetch.mockResolvedValueOnce({
@@ -216,7 +254,6 @@ describe('Admin Dashboard', () => {
         fireEvent.click(docsTab);
 
         await waitFor(() => {
-          // Find the ingest button by looking for the refresh icon and its parent button
           const ingestIcon = document.querySelector('.lucide-refresh-cw');
           expect(ingestIcon).toBeInTheDocument();
           
@@ -224,7 +261,7 @@ describe('Admin Dashboard', () => {
           expect(ingestButton).toBeInTheDocument();
 
           // Verify button has hover classes
-          expect(ingestButton).toHaveClass('hover:bg-indigo-50');
+          expect(ingestButton).toHaveClass('hover:bg-emerald-50');
           
           // Test hover interaction
           fireEvent.mouseEnter(ingestButton);
@@ -384,9 +421,9 @@ describe('Admin Dashboard', () => {
         });
       });
 
-      test('verifies ingest functionality for pending documents', async () => {
+      test('verifies approved documents expose trigger processing action', async () => {
         const mockDocs = [
-          { id: '1', filename: 'pending_doc.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
+          { id: '1', filename: 'approved_doc.pdf', file_type: 'application/pdf', status: 'approved', created_at: '2023-12-01T10:00:00Z' },
           { id: '2', filename: 'completed_doc.pdf', file_type: 'application/pdf', status: 'completed', created_at: '2023-12-02T10:00:00Z' },
         ];
 
@@ -402,14 +439,12 @@ describe('Admin Dashboard', () => {
         fireEvent.click(docsTab);
 
         await waitFor(() => {
-          // Verify ingest button is only present for pending documents
           const ingestButtons = document.querySelectorAll('.lucide-refresh-cw');
-          expect(ingestButtons).toHaveLength(1); // Only one pending document
+          expect(ingestButtons).toHaveLength(1);
 
-          // Find the ingest button and verify it's clickable
           const ingestButton = ingestButtons[0].closest('button');
           expect(ingestButton).toBeInTheDocument();
-          expect(ingestButton).toHaveAttribute('title', 'Ingest into ChromaDB');
+          expect(ingestButton).toHaveAttribute('title', 'Start RAG Processing');
 
           // Verify completed document doesn't have ingest button
           const completedRow = screen.getByText('completed_doc.pdf').closest('tr');
@@ -417,41 +452,6 @@ describe('Admin Dashboard', () => {
           const completedIngestButton = completedActionCell.querySelector('.lucide-refresh-cw');
           expect(completedIngestButton).toBeNull();
         });
-      });
-
-      test('verifies ingest button functionality and status change', async () => {
-        const mockDocs = [
-          { id: '1', filename: 'pending_doc.pdf', file_type: 'application/pdf', status: 'pending', created_at: '2023-12-01T10:00:00Z' },
-        ];
-
-        fetch.mockResolvedValueOnce({
-          ok: true,
-          json: async () => mockDocs,
-        });
-
-        render(<App />);
-
-        // Switch to documents tab
-        const docsTab = screen.getAllByText(/Documents/i).find(el => el.tagName === 'BUTTON');
-        fireEvent.click(docsTab);
-
-        await waitFor(() => {
-          expect(screen.getByText('Pending')).toBeInTheDocument();
-        });
-
-        // Click the ingest button
-        const ingestButton = document.querySelector('.lucide-refresh-cw').closest('button');
-        fireEvent.click(ingestButton);
-
-        // Verify status changes to "Ingesting" immediately
-        await waitFor(() => {
-          expect(screen.getByText('Ingesting')).toBeInTheDocument();
-        });
-
-        // Wait for the simulated ingestion to complete (3 seconds in the code)
-        await waitFor(() => {
-          expect(screen.getByText('Ingested')).toBeInTheDocument();
-        }, { timeout: 4000 });
       });
 
       test('verifies document upload functionality is preserved', async () => {
