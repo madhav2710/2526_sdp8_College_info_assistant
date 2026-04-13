@@ -104,7 +104,7 @@ def signup_user_account(request: SignupRequest) -> dict[str, Any]:
         raise
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Signup failed: {str(exc)}"
+            status_code=500, detail="Signup failed. Please try again."
         ) from exc
 
 
@@ -197,7 +197,7 @@ def get_user_profile_for_current_user(current_user: dict[str, Any]) -> dict[str,
         raise
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Failed to fetch user profile: {str(exc)}"
+            status_code=500, detail="Failed to fetch user profile. Please try again."
         ) from exc
 
 
@@ -226,5 +226,5 @@ def set_user_college_for_current_user(
         raise
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Failed to set college: {str(exc)}"
+            status_code=500, detail="Failed to set college. Please try again."
         ) from exc
