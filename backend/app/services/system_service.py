@@ -1,9 +1,12 @@
 import datetime as dt
+import logging
 from typing import Any, Optional
 
 from fastapi import HTTPException
 
 from app.core.database import get_service_client
+
+logger = logging.getLogger(__name__)
 
 
 def _timestamp() -> str:
@@ -99,8 +102,9 @@ def list_public_colleges() -> dict[str, list[dict[str, Any]]]:
         )
         return {"colleges": response.data or []}
     except Exception as exc:
+        logger.exception("Failed to load public colleges")
         raise HTTPException(
-            status_code=500, detail=f"Failed to load colleges: {str(exc)}"
+            status_code=500, detail="Failed to load colleges"
         ) from exc
 
 

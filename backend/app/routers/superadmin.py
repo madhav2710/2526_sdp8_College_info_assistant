@@ -28,7 +28,9 @@ from app.services.governance_service import (
     create_superadmin_college_record,
     delete_superadmin_admin_account,
     delete_superadmin_college_record,
+    get_superadmin_admin_record,
     get_superadmin_admin_directory,
+    get_superadmin_college_record,
     get_superadmin_college_directory,
     get_superadmin_dashboard_stats,
     get_superadmin_document_groups,
@@ -133,6 +135,15 @@ async def create_superadmin_college(
     return create_superadmin_college_record(request=request)
 
 
+@router.get("/superadmin/colleges/{college_id}")
+async def get_superadmin_college(
+    college_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_super_admin(current_user, "view college details")
+    return get_superadmin_college_record(college_id=college_id)
+
+
 @router.put("/superadmin/colleges/{college_id}")
 async def update_superadmin_college(
     college_id: str,
@@ -168,6 +179,15 @@ async def create_superadmin_admin(
 ):
     _require_super_admin(current_user, "create admins")
     return create_superadmin_admin_account(request=request)
+
+
+@router.get("/superadmin/admins/{admin_id}")
+async def get_superadmin_admin(
+    admin_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_super_admin(current_user, "view admin details")
+    return get_superadmin_admin_record(admin_id=admin_id)
 
 
 @router.put("/superadmin/admins/{admin_id}")

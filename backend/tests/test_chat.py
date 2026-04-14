@@ -198,15 +198,21 @@ def test_guest_chat_falls_back_to_basic_response():
         "chunks_used": 0,
         "quality_score": None,
     }
+    failing_rag_module = make_rag_module(fallback_response)
+    failing_rag_module.generate_rag_response = AsyncMock(
+        side_effect=Exception("RAG unavailable")
+    )
 
     with (
         patch(
             "app.services.chat_service.get_service_client",
             return_value=mock_service_client,
         ),
-        patch(
-            "app.core.rag.generate_rag_response",
-            new=AsyncMock(side_effect=Exception("RAG unavailable")),
+        patch.dict(
+            sys.modules,
+            {
+                "app.core.rag": failing_rag_module,
+            },
         ),
         patch(
             "app.services.chat_service.generate_basic_response",

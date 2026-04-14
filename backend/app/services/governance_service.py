@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -9,6 +10,8 @@ from app.schemas.admin import (
     AdminUpdateRequest,
 )
 from app.schemas.college import CollegeCreateRequest, CollegeUpdateRequest
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_sort_order(sort_order: Optional[str], default: str = "desc") -> str:
@@ -51,7 +54,84 @@ def _map_governance_error(action: str, exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=400, detail="A college with this domain already exists"
         )
-    return HTTPException(status_code=500, detail=f"Failed to {action}: {message}")
+    logger.exception("Failed to %s", action)
+    return HTTPException(status_code=500, detail=f"Failed to {action}")
+
+
+def _raise_governance_server_error(
+    action: str,
+    exc: Exception,
+    *,
+    detail: Optional[str] = None,
+    status_code: int = 500,
+) -> None:
+    logger.exception("Failed to %s", action)
+    raise HTTPException(
+        status_code=status_code,
+        detail=detail or f"Failed to {action}",
+    ) from exc
+
+
+def _get_college_name_map(client: Any, college_ids: set[str]) -> dict[str, str]:
+    if not college_ids:
+        return {}
+
+    college_map: dict[str, str] = {}
+    for college in (
+        client.table("colleges")
+        .select("id, name")
+        .in_("id", list(college_ids))
+        .execute()
+        .data
+        or []
+    ):
+        college_map[college["id"]] = college["name"]
+    return college_map
+
+
+def _get_user_email_map(client: Any, user_ids: set[str]) -> dict[str, str]:
+    if not user_ids:
+        return {}
+
+    email_map: dict[str, str] = {}
+    for user in (
+        client.table("users").select("id, email").in_("id", list(user_ids)).execute().data
+        or []
+    ):
+        email_map[user["id"]] = user.get("email") or ""
+    return email_map
+
+
+def _build_admin_payload(
+    admin: dict[str, Any],
+    *,
+    college_name: Optional[str],
+    email: str = "",
+) -> dict[str, Any]:
+    return {
+        "id": admin["id"],
+        "name": admin.get("full_name") or "Unnamed Admin",
+        "email": email,
+        "college_id": admin.get("college_id"),
+        "college": college_name or "Unassigned",
+        "status": admin.get("status") or "active",
+        "joined": admin.get("created_at"),
+    }
+
+
+def _rollback_created_auth_user(client: Any, user_id: str) -> None:
+    try:
+        client.auth.admin.delete_user(user_id)
+        logger.info("Rolled back auth user %s after admin creation failure", user_id)
+    except Exception as rollback_exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to rollback auth user %s after admin creation failure",
+            user_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create admin and rollback auth user",
+        ) from rollback_exc
 
 
 def get_superadmin_dashboard_stats() -> dict[str, int]:
@@ -83,9 +163,7 @@ def get_superadmin_dashboard_stats() -> dict[str, int]:
             "activeNodes": 12,
         }
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve superadmin stats: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("retrieve superadmin stats", exc)
 
 
 def get_superadmin_college_directory(
@@ -130,9 +208,50 @@ def get_superadmin_college_directory(
     except Exception as exc:  # noqa: BLE001
         if isinstance(exc, HTTPException):
             raise exc
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve colleges: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("retrieve colleges", exc)
+
+
+def get_superadmin_college_record(college_id: str) -> dict[str, Any]:
+    try:
+        client = get_service_client()
+        response = (
+            client.table("colleges")
+            .select("id, name, code, domain, description, logo_url, is_active, created_at")
+            .eq("id", college_id)
+            .limit(1)
+            .execute()
+        )
+        if not response.data:
+            raise HTTPException(status_code=404, detail="College not found")
+
+        college = response.data[0]
+        admin_count = 0
+        try:
+            admin_count = _extract_count(
+                client.table("profiles")
+                .select("id", count="exact")
+                .eq("role", "college_admin")
+                .eq("college_id", college_id)
+                .execute()
+            )
+        except Exception:  # noqa: BLE001
+            admin_count = 0
+
+        return {
+            "id": college["id"],
+            "name": college["name"],
+            "code": college.get("code"),
+            "domain": college.get("domain"),
+            "description": college.get("description"),
+            "logo_url": college.get("logo_url"),
+            "is_active": college.get("is_active", True),
+            "admin_count": admin_count,
+            "created_at": college.get("created_at"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, HTTPException):
+            raise exc
+        _raise_governance_server_error("retrieve college", exc)
 
 
 def create_superadmin_college_record(request: CollegeCreateRequest) -> dict[str, Any]:
@@ -197,9 +316,7 @@ def delete_superadmin_college_record(college_id: str) -> dict[str, str]:
     except Exception as exc:  # noqa: BLE001
         if isinstance(exc, HTTPException):
             raise exc
-        raise HTTPException(
-            status_code=500, detail=f"Failed to delete college: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("delete college", exc)
 
 
 def get_superadmin_admin_directory(
@@ -209,7 +326,7 @@ def get_superadmin_admin_directory(
         client = get_service_client()
         admins = (
             client.table("profiles")
-            .select("id, college_id, full_name, role, created_at")
+            .select("id, college_id, full_name, role, created_at, status")
             .eq("role", "college_admin")
             .execute()
             .data
@@ -219,30 +336,17 @@ def get_superadmin_admin_directory(
         college_ids = {
             admin["college_id"] for admin in admins if admin.get("college_id")
         }
-        college_map: dict[str, str] = {}
-        if college_ids:
-            for college in (
-                client.table("colleges")
-                .select("id, name")
-                .in_("id", list(college_ids))
-                .execute()
-                .data
-                or []
-            ):
-                college_map[college["id"]] = college["name"]
+        college_map = _get_college_name_map(client, college_ids)
+        email_map = _get_user_email_map(client, {admin["id"] for admin in admins})
 
         admin_list = []
         for admin in admins:
             admin_list.append(
-                {
-                    "id": admin["id"],
-                    "name": admin.get("full_name") or "Unnamed Admin",
-                    "email": "",
-                    "college_id": admin.get("college_id"),
-                    "college": college_map.get(admin.get("college_id"), "Unassigned"),
-                    "status": "active",
-                    "joined": admin.get("created_at"),
-                }
+                _build_admin_payload(
+                    admin,
+                    college_name=college_map.get(admin.get("college_id")),
+                    email=email_map.get(admin["id"], ""),
+                )
             )
 
         search_term = normalize_search_term(search)
@@ -258,12 +362,44 @@ def get_superadmin_admin_directory(
 
         return {"admins": admin_list}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve admins: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("retrieve admins", exc)
+
+
+def get_superadmin_admin_record(admin_id: str) -> dict[str, Any]:
+    try:
+        client = get_service_client()
+        response = (
+            client.table("profiles")
+            .select("id, college_id, full_name, role, created_at, status")
+            .eq("id", admin_id)
+            .eq("role", "college_admin")
+            .limit(1)
+            .execute()
+        )
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Admin not found")
+
+        admin = response.data[0]
+        college_map = _get_college_name_map(
+            client,
+            {admin["college_id"]} if admin.get("college_id") else set(),
+        )
+        email_map = _get_user_email_map(client, {admin_id})
+        return _build_admin_payload(
+            admin,
+            college_name=college_map.get(admin.get("college_id")),
+            email=email_map.get(admin_id, ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        if isinstance(exc, HTTPException):
+            raise exc
+        _raise_governance_server_error("retrieve admin", exc)
 
 
 def create_superadmin_admin_account(request: AdminCreateRequest) -> dict[str, str]:
+    client: Any = None
+    user_id: Optional[str] = None
+    rollback_required = False
     try:
         client = get_service_client()
         try:
@@ -290,6 +426,7 @@ def create_superadmin_admin_account(request: AdminCreateRequest) -> dict[str, st
                     status_code=500, detail="Auth user record is missing an id"
                 )
             user_id = str(raw_user_id)
+            rollback_required = True
         except Exception as exc:  # noqa: BLE001
             if isinstance(exc, HTTPException):
                 raise exc
@@ -303,9 +440,7 @@ def create_superadmin_admin_account(request: AdminCreateRequest) -> dict[str, st
                 raise HTTPException(
                     status_code=400, detail="An account with this email already exists"
                 )
-            raise HTTPException(
-                status_code=500, detail=f"Failed to create auth user: {message}"
-            ) from exc
+            _raise_governance_server_error("create auth user", exc)
 
         client.table("profiles").upsert(
             {
@@ -313,6 +448,7 @@ def create_superadmin_admin_account(request: AdminCreateRequest) -> dict[str, st
                 "full_name": request.name,
                 "role": "college_admin",
                 "college_id": request.college_id,
+                "status": "active",
             }
         ).execute()
 
@@ -321,22 +457,18 @@ def create_superadmin_admin_account(request: AdminCreateRequest) -> dict[str, st
                 {"id": user_id, "email": request.email},
                 on_conflict="id",
             ).execute()
-        except Exception:
-            pass
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to sync compatibility users row for %s", user_id)
 
-        try:
-            client.table("admins").upsert(
-                {
-                    "user_id": user_id,
-                    "college_id": request.college_id,
-                    "is_super_admin": False,
-                },
-                on_conflict="user_id,college_id",
-            ).execute()
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(
-                status_code=400, detail=f"Failed to create admin record: {str(exc)}"
-            ) from exc
+        client.table("admins").upsert(
+            {
+                "user_id": user_id,
+                "college_id": request.college_id,
+                "is_super_admin": False,
+            },
+            on_conflict="user_id,college_id",
+        ).execute()
+        rollback_required = False
 
         return {
             "id": user_id,
@@ -346,11 +478,11 @@ def create_superadmin_admin_account(request: AdminCreateRequest) -> dict[str, st
             "status": "active",
         }
     except Exception as exc:  # noqa: BLE001
+        if rollback_required and user_id:
+            _rollback_created_auth_user(client, user_id)
         if isinstance(exc, HTTPException):
             raise exc
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create admin: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("create admin", exc)
 
 
 def update_superadmin_admin_account(
@@ -369,24 +501,25 @@ def update_superadmin_admin_account(
 
         return {"status": "success"}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to update admin: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("update admin", exc)
 
 
 def delete_superadmin_admin_account(admin_id: str) -> dict[str, str]:
     try:
         client = get_service_client()
-        client.table("profiles").delete().eq("id", admin_id).execute()
+        client.auth.admin.delete_user(admin_id)
         try:
-            client.auth.admin.delete_user(admin_id)
-        except Exception:
-            pass
+            client.table("profiles").delete().eq("id", admin_id).execute()
+            client.table("users").delete().eq("id", admin_id).execute()
+            client.table("admins").delete().eq("user_id", admin_id).execute()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Auth user %s deleted successfully; leftover relational cleanup may be required",
+                admin_id,
+            )
         return {"status": "success"}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to delete admin: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("delete admin", exc)
 
 
 def toggle_superadmin_admin_account_status(
@@ -399,9 +532,7 @@ def toggle_superadmin_admin_account_status(
         ).execute()
         return {"status": "success"}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to update admin status: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("update admin status", exc)
 
 
 def get_superadmin_document_groups(
@@ -514,6 +645,4 @@ def get_superadmin_document_groups(
 
         return {"groups": groups}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve documents: {str(exc)}"
-        ) from exc
+        _raise_governance_server_error("retrieve documents", exc)

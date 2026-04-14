@@ -34,10 +34,20 @@ def create_app() -> FastAPI:
     except ConfigurationError as exc:
         logger.error("Configuration validation failed: %s", str(exc))
         logger.error("Application startup failed due to invalid configuration")
+        logger.error(
+            "Verify deployment environment variables before restart. Required core settings include "
+            "SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY, and JWT_SECRET_KEY."
+        )
+        logger.error(
+            "GEMINI_API_KEY is optional for startup but required for full RAG functionality."
+        )
         raise SystemExit(1) from exc
     except Exception as exc:  # noqa: BLE001
         logger.error("Unexpected error during configuration validation: %s", str(exc))
         logger.error("Application startup failed")
+        logger.error(
+            "Inspect the startup configuration and environment injection for this container before allowing it to restart repeatedly."
+        )
         raise SystemExit(1) from exc
 
     app = FastAPI()

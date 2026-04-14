@@ -185,8 +185,15 @@ async def _upload_file_to_storage(
                 await asyncio.sleep(0.5 * attempt)
                 continue
 
+            logger.error(
+                "Storage upload failed for %s with status %s: %s",
+                storage_path,
+                response.status_code,
+                response.text,
+            )
             raise HTTPException(
-                status_code=400, detail=f"File upload failed: {response.text}"
+                status_code=400,
+                detail="File upload failed. Please try again.",
             )
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
             last_upload_error = exc
@@ -238,7 +245,15 @@ async def _insert_document_record(document_data: dict[str, Any]) -> dict[str, An
         )
 
     if response.status_code not in {200, 201}:
-        raise HTTPException(status_code=500, detail=f"Database error: {response.text}")
+        logger.error(
+            "Document record creation failed with status %s: %s",
+            response.status_code,
+            response.text,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create document record. Please try again.",
+        )
 
     db_data = response.json()
     document_record = db_data[0] if db_data else None
@@ -366,8 +381,9 @@ async def upload_document_for_admin(
                     storage_path,
                     str(cleanup_error),
                 )
+        logger.exception("Failed to upload document")
         raise HTTPException(
-            status_code=500, detail=f"Upload failed: {str(exc)}"
+            status_code=500, detail="Upload failed. Please try again."
         ) from exc
 
 
@@ -414,8 +430,10 @@ def get_admin_query_history(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to retrieve admin query history")
         raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve query history: {str(exc)}"
+            status_code=500,
+            detail="Failed to retrieve query history. Please try again.",
         ) from exc
 
 
@@ -566,8 +584,10 @@ def get_admin_documents(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to retrieve admin documents")
         raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve documents: {str(exc)}"
+            status_code=500,
+            detail="Failed to retrieve documents. Please try again.",
         ) from exc
 
 
@@ -704,8 +724,10 @@ def get_pending_documents_for_superadmin() -> dict[str, Any]:
             "total_pending": len(pending_documents),
         }
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to retrieve pending documents for superadmin")
         raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve pending documents: {str(exc)}"
+            status_code=500,
+            detail="Failed to retrieve pending documents. Please try again.",
         ) from exc
 
 
@@ -751,9 +773,10 @@ def get_scheduled_documents_for_superadmin() -> dict[str, Any]:
             "total_scheduled": len(scheduled_documents),
         }
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to retrieve scheduled documents for superadmin")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve scheduled documents: {str(exc)}",
+            detail="Failed to retrieve scheduled documents. Please try again.",
         ) from exc
 
 
@@ -884,8 +907,9 @@ async def approve_document_for_superadmin(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to approve document %s", str(request.document_id))
         raise HTTPException(
-            status_code=500, detail=f"Approval failed: {str(exc)}"
+            status_code=500, detail="Approval failed. Please try again."
         ) from exc
 
 
@@ -976,8 +1000,9 @@ async def reject_document_for_superadmin(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to reject document %s", str(request.document_id))
         raise HTTPException(
-            status_code=500, detail=f"Rejection failed: {str(exc)}"
+            status_code=500, detail="Rejection failed. Please try again."
         ) from exc
 
 
@@ -1030,8 +1055,12 @@ async def schedule_document_processing_for_superadmin(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to schedule processing for document %s",
+            str(request.document_id),
+        )
         raise HTTPException(
-            status_code=500, detail=f"Scheduling failed: {str(exc)}"
+            status_code=500, detail="Scheduling failed. Please try again."
         ) from exc
 
 
@@ -1100,8 +1129,13 @@ async def trigger_document_processing_for_superadmin(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Failed to trigger processing for document %s",
+            str(request.document_id),
+        )
         raise HTTPException(
-            status_code=500, detail=f"Trigger processing failed: {str(exc)}"
+            status_code=500,
+            detail="Trigger processing failed. Please try again.",
         ) from exc
 
 
@@ -1194,11 +1228,11 @@ async def trigger_manual_rag_processing_for_admin(
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "Failed to trigger manual RAG processing for document %s: %s",
+        logger.exception(
+            "Failed to trigger manual RAG processing for document %s",
             str(document_id),
-            str(exc),
         )
         raise HTTPException(
-            status_code=500, detail=f"Failed to trigger RAG processing: {str(exc)}"
+            status_code=500,
+            detail="Failed to trigger RAG processing. Please try again.",
         ) from exc

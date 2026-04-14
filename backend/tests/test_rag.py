@@ -1,6 +1,8 @@
 import asyncio
-import sys
+import math
 import os
+import sys
+import types
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -12,6 +14,36 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 os.environ.setdefault("SERVICE_ROLE_KEY", "test-service-key")
+
+pypdf_module = types.ModuleType("pypdf")
+setattr(pypdf_module, "PdfReader", object)
+sys.modules.setdefault("pypdf", pypdf_module)
+
+numpy_module = types.ModuleType("numpy")
+
+
+class _FakeArray(list):
+    @property
+    def size(self):
+        return len(self)
+
+
+setattr(numpy_module, "float32", float)
+setattr(numpy_module, "array", lambda values, dtype=None: _FakeArray(values))
+setattr(
+    numpy_module,
+    "dot",
+    lambda left, right: sum(a * b for a, b in zip(left, right)),
+)
+setattr(
+    numpy_module,
+    "linalg",
+    types.SimpleNamespace(
+        norm=lambda values: math.sqrt(sum(value * value for value in values))
+    ),
+)
+sys.modules.setdefault("numpy", numpy_module)
+
 from app.core.config import AIConfig, RAGConfig
 from app.core.rag import (
     process_document,

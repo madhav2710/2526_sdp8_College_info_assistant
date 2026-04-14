@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.core.auth import ensure_profile_is_active
 from app.core.database import get_service_client, supabase
 from app.schemas.auth import LoginRequest, SetCollegeRequest, SignupRequest
 
@@ -118,7 +119,7 @@ def login_user_account(request: LoginRequest) -> dict[str, Any]:
         user_email = auth_response.user.email
         profile_response = (
             supabase.table("profiles")
-            .select("role, college_id, full_name")
+            .select("role, college_id, full_name, status")
             .eq("id", user_id)
             .execute()
         )
@@ -127,6 +128,7 @@ def login_user_account(request: LoginRequest) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="User profile not found")
 
         profile = profile_response.data[0]
+        ensure_profile_is_active(profile, user_id)
 
         return {
             "access_token": auth_response.session.access_token,
