@@ -1,9 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-// Get JWT token from localStorage
 const getToken = () => {
-  const token = localStorage.getItem('admin_token');
-  return token;
+  return localStorage.getItem('admin_token') || sessionStorage.getItem('admin_token');
 };
 
 // API request helper

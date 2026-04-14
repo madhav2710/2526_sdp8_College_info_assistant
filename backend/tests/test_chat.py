@@ -1,187 +1,442 @@
-import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+import sys
+import types
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-# Import the app and create a test client with proper initialization
-from main import app
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-# Try different TestClient imports based on version
-try:
-    from httpx import AsyncClient
-    import asyncio
-    
-    # Use httpx directly for testing
-    async def make_request(method, url, **kwargs):
-        async with AsyncClient(app=app, base_url="http://test") as client:
-            return await client.request(method, url, **kwargs)
-    
-    # Helper function to run async tests
-    def run_async(coro):
-        return asyncio.run(coro)
-        
-except ImportError:
-    # Fallback to requests-based testing
-    from fastapi.testclient import TestClient
-    client = TestClient(app=app)
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-key")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
+os.environ.setdefault("SERVICE_ROLE_KEY", "test-service-key")
+os.environ.setdefault("JWT_SECRET_KEY", "12345678901234567890123456789012")
+
+supabase_module = types.ModuleType("supabase")
+google_module = types.ModuleType("google")
+google_generativeai_module = types.ModuleType("google.generativeai")
+setattr(google_generativeai_module, "configure", lambda **kwargs: None)
+setattr(google_module, "generativeai", google_generativeai_module)
+
+
+class _Client:
+    def __init__(self):
+        self.auth = types.SimpleNamespace(
+            admin=types.SimpleNamespace(),
+            get_user=lambda *args, **kwargs: None,
+        )
+
+    def table(self, *args, **kwargs):
+        return self
+
+    def select(self, *args, **kwargs):
+        return self
+
+    def eq(self, *args, **kwargs):
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
+    def insert(self, *args, **kwargs):
+        return self
+
+    def delete(self, *args, **kwargs):
+        return self
+
+    def execute(self):
+        return types.SimpleNamespace(data=[])
+
+
+setattr(supabase_module, "Client", _Client)
+setattr(supabase_module, "create_client", lambda *args, **kwargs: _Client())
+sys.modules.setdefault("supabase", supabase_module)
+sys.modules.setdefault("google", google_module)
+sys.modules.setdefault("google.generativeai", google_generativeai_module)
+
+from app.core.auth import get_current_user
+from app.routers.chat import router
+from app.services.chat_service import clear_rate_limit_cache
+
+app = FastAPI()
+app.include_router(router)
+client = TestClient(app)
+
+
+async def mock_current_user():
+    return {
+        "user_id": "11111111-1111-1111-1111-111111111111",
+        "role": "student",
+        "college_id": "test-college-id",
+    }
+
+
+def make_rag_module(response: dict):
+    rag_module = types.ModuleType("app.core.rag")
+
+    class EmbeddingServiceError(Exception):
+        pass
+
+    class VectorStoreError(Exception):
+        pass
+
+    class RAGError(Exception):
+        pass
+
+    async def generate_rag_response(**kwargs):
+        return response
+
+    setattr(rag_module, "EmbeddingServiceError", EmbeddingServiceError)
+    setattr(rag_module, "VectorStoreError", VectorStoreError)
+    setattr(rag_module, "RAGError", RAGError)
+    setattr(rag_module, "generate_rag_response", generate_rag_response)
+    return rag_module
+
 
 def test_create_chat_message():
-    """Test the enhanced chat endpoint with proper mocking"""
+    app.dependency_overrides[get_current_user] = mock_current_user
+    clear_rate_limit_cache()
     conv_id = str(uuid4())
-    user_id = str(uuid4())
-    message_content = "Hello, I need the syllabus."
-    
-    with patch("main.get_service_client") as mock_get_client, \
-         patch("main.get_current_user") as mock_get_current_user, \
-         patch("app.core.rag.generate_rag_response") as mock_rag_response:
-        
-        # Mock authentication
-        mock_get_current_user.return_value = {"user_id": user_id, "role": "user"}
-        
-        # Mock database client
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        
-        # Mock profile lookup (for college_id)
-        mock_profile = MagicMock()
-        mock_profile.data = [{"college_id": "test-college-id", "role": "user"}]
-        
-        # Mock conversation check (return empty to trigger creation)
-        mock_conv_check = MagicMock()
-        mock_conv_check.data = []
-        
-        # Mock message insertion
-        mock_message_insert = MagicMock()
-        mock_message_insert.data = [{"id": "msg-123"}]
-        
-        # Setup table mocks
-        def table_mock(name):
-            m = MagicMock()
-            if name == "messages":
-                m.insert.return_value.execute.return_value = mock_message_insert
-            elif name == "profiles":
-                m.select.return_value.eq.return_value.execute.return_value = mock_profile
-            elif name == "conversations":
-                m.select.return_value.eq.return_value.execute.return_value = mock_conv_check
-                m.insert.return_value.execute.return_value = MagicMock(data=[{"id": conv_id}])
-            return m
-            
-        mock_client.table.side_effect = table_mock
-        
-        # Mock RAG response
-        mock_rag_response.return_value = {
-            "response": "Here is the syllabus information you requested.",
-            "sources": ["syllabus.pdf"],
-            "chunks_used": 2,
-            "fallback_used": False
-        }
+    user_id = "11111111-1111-1111-1111-111111111111"
 
-        # Test using httpx if available, otherwise skip
-        try:
-            response = run_async(make_request("POST", "/chat/", json={
+    profiles_table = MagicMock()
+    profiles_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[{"college_id": "test-college-id", "role": "student"}])
+    )
+
+    conversations_table = MagicMock()
+    conversations_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[])
+    )
+    conversations_table.insert.return_value.execute.return_value = SimpleNamespace(
+        data=[{"id": conv_id}]
+    )
+
+    messages_table = MagicMock()
+    messages_table.insert.return_value.execute.side_effect = [
+        SimpleNamespace(data=[{"id": "user-message-id"}]),
+        SimpleNamespace(data=[{"id": "assistant-message-id"}]),
+    ]
+    messages_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = SimpleNamespace(
+        data=[]
+    )
+
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "profiles": profiles_table,
+        "conversations": conversations_table,
+        "messages": messages_table,
+    }[table_name]
+
+    with (
+        patch(
+            "app.services.chat_service.get_service_client",
+            return_value=mock_service_client,
+        ),
+        patch.dict(
+            sys.modules,
+            {
+                "app.core.rag": make_rag_module(
+                    {
+                        "response": "Here is the syllabus information you requested.",
+                        "sources": ["syllabus.pdf"],
+                        "chunks_used": 2,
+                        "fallback_used": False,
+                        "quality_score": 0.91,
+                        "source_details": [],
+                        "conversation_context_used": False,
+                    }
+                )
+            },
+        ),
+    ):
+        response = client.post(
+            "/chat/",
+            json={
                 "conversation_id": conv_id,
                 "user_id": user_id,
                 "role": "user",
-                "content": message_content
-            }))
-            
-            assert response.status_code == 200
-            response_data = response.json()
-            assert response_data["status"] == "success"
-            assert response_data["role"] == "assistant"
-            assert "syllabus information" in response_data["content"]
-            assert "sources" in response_data
-            assert "metadata" in response_data
-            
-        except NameError:
-            # Skip test if httpx not available
-            pytest.skip("httpx not available for async testing")
+                "content": "Hello, I need the syllabus.",
+            },
+        )
 
-def test_get_chat_history():
-    user_id = str(uuid4())
-    
-    with patch("main.supabase.table") as mock_table:
-        # Create a mock execution result
-        mock_exe = MagicMock()
-        mock_exe.data = [{"id": "conv-1", "title": "First Chat"}]
-        # Mock the chain: table().select().eq().order().execute()
-        mock_table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value = mock_exe
+    app.dependency_overrides.clear()
+    clear_rate_limit_cache()
 
-        response = client.get(f"/chat/history/?user_id={user_id}")
-        
-        assert response.status_code == 200
-        assert isinstance(response.json(), list)
-        assert len(response.json()) == 1
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["status"] == "success"
+    assert response_data["role"] == "assistant"
+    assert "syllabus information" in response_data["content"]
+    assert response_data["sources"] == ["syllabus.pdf"]
+    assert response_data["conversation_id"] == conv_id
+    assert response_data["metadata"]["chunks_used"] == 2
+    assert response_data["metadata"]["rag_enabled"] is True
+
+
+def test_guest_chat_falls_back_to_basic_response():
+    colleges_table = MagicMock()
+    colleges_table.select.return_value.limit.return_value.execute.return_value = (
+        SimpleNamespace(data=[{"id": "college-1"}])
+    )
+
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "colleges": colleges_table,
+    }[table_name]
+
+    fallback_response = {
+        "response": "Fallback answer",
+        "sources": [],
+        "chunks_used": 0,
+        "quality_score": None,
+    }
+    failing_rag_module = make_rag_module(fallback_response)
+    failing_rag_module.generate_rag_response = AsyncMock(
+        side_effect=Exception("RAG unavailable")
+    )
+
+    with (
+        patch(
+            "app.services.chat_service.get_service_client",
+            return_value=mock_service_client,
+        ),
+        patch.dict(
+            sys.modules,
+            {
+                "app.core.rag": failing_rag_module,
+            },
+        ),
+        patch(
+            "app.services.chat_service.generate_basic_response",
+            new=AsyncMock(return_value=fallback_response),
+        ),
+    ):
+        response = client.post(
+            "/guest-chat",
+            json={"content": "Tell me about admissions"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["content"] == "Fallback answer"
+    assert response.json()["sources"] == []
+    assert response.json()["metadata"]["fallback_used"] is True
+    assert response.json()["metadata"]["chunks_used"] == 0
+    assert response.json()["metadata"]["quality_score"] is None
+    assert response.json()["metadata"]["fallback_reason"].startswith(
+        "Guest RAG failed:"
+    )
+
+
+def test_get_chat_history_requires_authentication():
+    response = client.get("/chat/history/")
+
+    assert response.status_code == 401
+
+
+def test_get_chat_history_uses_current_user():
+    app.dependency_overrides[get_current_user] = mock_current_user
+
+    with patch(
+        "app.routers.chat.get_chat_history_for_user",
+        new=AsyncMock(return_value=[{"id": "conv-1", "title": "First Chat"}]),
+    ) as mock_get_chat_history:
+        response = client.get("/chat/history/")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == [{"id": "conv-1", "title": "First Chat"}]
+    mock_get_chat_history.assert_awaited_once_with(
+        user_id="11111111-1111-1111-1111-111111111111"
+    )
+
+
+def test_get_conversation_messages():
+    app.dependency_overrides[get_current_user] = mock_current_user
+    conversation_id = str(uuid4())
+
+    conversations_table = MagicMock()
+    conversations_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[{"user_id": "11111111-1111-1111-1111-111111111111"}])
+    )
+
+    messages_table = MagicMock()
+    messages_table.select.return_value.eq.return_value.order.return_value.execute.return_value = SimpleNamespace(
+        data=[
+            {
+                "id": "message-1",
+                "role": "user",
+                "content": "Hello",
+                "created_at": "2024-01-04T10:00:00Z",
+                "metadata": None,
+            }
+        ]
+    )
+
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "conversations": conversations_table,
+        "messages": messages_table,
+    }[table_name]
+
+    with patch(
+        "app.services.chat_service.get_service_client",
+        return_value=mock_service_client,
+    ):
+        response = client.get(f"/chat/conversation/{conversation_id}/messages")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "conversation_id": conversation_id,
+        "messages": [
+            {
+                "id": "message-1",
+                "role": "user",
+                "content": "Hello",
+                "created_at": "2024-01-04T10:00:00Z",
+                "metadata": None,
+            }
+        ],
+    }
+
+
+def test_delete_conversation_uses_current_user():
+    app.dependency_overrides[get_current_user] = mock_current_user
+    conversation_id = str(uuid4())
+
+    with patch(
+        "app.routers.chat.delete_conversation_for_user",
+        new=AsyncMock(
+            return_value={"status": "success", "conversation_id": conversation_id}
+        ),
+    ) as mock_delete_conversation:
+        response = client.delete(f"/chat/conversation/{conversation_id}")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "conversation_id": conversation_id}
+    mock_delete_conversation.assert_awaited_once_with(
+        conversation_id=conversation_id,
+        user_id="11111111-1111-1111-1111-111111111111",
+    )
+
+
+def test_create_chat_rejects_mismatched_user_before_rate_limit():
+    app.dependency_overrides[get_current_user] = mock_current_user
+    clear_rate_limit_cache()
+    conv_id = str(uuid4())
+
+    with patch(
+        "app.services.chat_service.check_and_update_rate_limit"
+    ) as mock_rate_limit:
+        response = client.post(
+            "/chat/",
+            json={
+                "conversation_id": conv_id,
+                "user_id": str(uuid4()),
+                "role": "user",
+                "content": "Hello",
+            },
+        )
+
+    app.dependency_overrides.clear()
+    clear_rate_limit_cache()
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Not authorized to send messages for this user"
+    }
+    mock_rate_limit.assert_not_called()
+
 
 def test_chat_rate_limiting():
-    """Test that rate limiting works for chat endpoint"""
+    app.dependency_overrides[get_current_user] = mock_current_user
+    clear_rate_limit_cache()
     conv_id = str(uuid4())
-    user_id = str(uuid4())
-    message_content = "Test message"
-    
-    with patch("main.get_service_client") as mock_get_client, \
-         patch("main.get_current_user") as mock_get_current_user, \
-         patch("app.core.rag.generate_rag_response") as mock_rag_response:
-        
-        # Mock authentication
-        mock_get_current_user.return_value = {"user_id": user_id, "role": "user"}
-        
-        # Mock database client
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        
-        # Mock profile lookup
-        mock_profile = MagicMock()
-        mock_profile.data = [{"college_id": "test-college-id", "role": "user"}]
-        
-        # Mock conversation check
-        mock_conv_check = MagicMock()
-        mock_conv_check.data = []
-        
-        # Mock message insertion
-        mock_message_insert = MagicMock()
-        mock_message_insert.data = [{"id": "msg-123"}]
-        
-        # Setup table mocks
-        def table_mock(name):
-            m = MagicMock()
-            if name == "messages":
-                m.insert.return_value.execute.return_value = mock_message_insert
-            elif name == "profiles":
-                m.select.return_value.eq.return_value.execute.return_value = mock_profile
-            elif name == "conversations":
-                m.select.return_value.eq.return_value.execute.return_value = mock_conv_check
-                m.insert.return_value.execute.return_value = MagicMock(data=[{"id": conv_id}])
-            return m
-            
-        mock_client.table.side_effect = table_mock
-        
-        # Mock RAG response
-        mock_rag_response.return_value = {
-            "response": "Test response",
-            "sources": [],
-            "chunks_used": 0,
-            "fallback_used": False
-        }
-        
-        # Clear any existing rate limit cache
-        if hasattr(client.app.routes[0].endpoint, 'rate_limit_cache'):
-            delattr(client.app.routes[0].endpoint, 'rate_limit_cache')
-        
-        # Send 11 requests rapidly (should trigger rate limit on 11th)
-        for i in range(11):
-            response = client.post("/chat/", json={
-                "conversation_id": conv_id,
-                "user_id": user_id,
-                "role": "user",
-                "content": f"{message_content} {i}"
-            })
-            
-            if i < 10:
+    user_id = "11111111-1111-1111-1111-111111111111"
+
+    profiles_table = MagicMock()
+    profiles_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[{"college_id": "test-college-id", "role": "student"}])
+    )
+
+    conversations_table = MagicMock()
+    conversations_table.select.return_value.eq.return_value.execute.return_value = (
+        SimpleNamespace(data=[])
+    )
+    conversations_table.insert.return_value.execute.return_value = SimpleNamespace(
+        data=[{"id": conv_id}]
+    )
+
+    messages_table = MagicMock()
+    messages_table.insert.return_value.execute.side_effect = [
+        SimpleNamespace(data=[{"id": f"user-{index}"}])
+        if index % 2 == 0
+        else SimpleNamespace(data=[{"id": f"assistant-{index}"}])
+        for index in range(20)
+    ]
+    messages_table.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = SimpleNamespace(
+        data=[]
+    )
+
+    mock_service_client = MagicMock()
+    mock_service_client.table.side_effect = lambda table_name: {
+        "profiles": profiles_table,
+        "conversations": conversations_table,
+        "messages": messages_table,
+    }[table_name]
+
+    with (
+        patch(
+            "app.services.chat_service.get_service_client",
+            return_value=mock_service_client,
+        ),
+        patch.dict(
+            sys.modules,
+            {
+                "app.core.rag": make_rag_module(
+                    {
+                        "response": "Test response",
+                        "sources": [],
+                        "chunks_used": 0,
+                        "fallback_used": False,
+                        "quality_score": 0.5,
+                        "source_details": [],
+                        "conversation_context_used": False,
+                    }
+                )
+            },
+        ),
+    ):
+        for index in range(11):
+            response = client.post(
+                "/chat/",
+                json={
+                    "conversation_id": conv_id,
+                    "user_id": user_id,
+                    "role": "user",
+                    "content": f"Test message {index}",
+                },
+            )
+
+            if index < 10:
                 assert response.status_code == 200
             else:
                 assert response.status_code == 429
-                assert "Too many requests" in response.json()["detail"]
+                assert response.json()["detail"] == (
+                    "Too many requests. Please wait before sending another message."
+                )
+
+    app.dependency_overrides.clear()
+    clear_rate_limit_cache()

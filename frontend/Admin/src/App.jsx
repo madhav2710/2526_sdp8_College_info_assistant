@@ -17,61 +17,48 @@ import {
   Info
 } from 'lucide-react';
 
-// Mock Initial Data
-const INITIAL_DOCS = [
-  { id: '1', name: 'CS_Syllabus_2024.pdf', type: 'Syllabus', size: '2.4 MB', status: 'Ingested', date: '2023-12-01' },
-  { id: '2', name: 'Placement_Report_Q3.pdf', type: 'Placement', size: '1.8 MB', status: 'Ingested', date: '2023-11-28' },
-  { id: '3', name: 'Campus_Overview_Brochure.pdf', type: 'Overview', size: '5.2 MB', status: 'Pending', date: '2023-12-20' },
-  { id: '4', name: 'Exam_Schedule_Winter.pdf', type: 'Notice', size: '840 KB', status: 'Failed', date: '2023-12-15' }
-];
+const ADMIN_STORAGE_KEYS = {
+  token: 'admin_token',
+  collegeId: 'admin_college_id',
+};
 
-const INITIAL_HISTORY = [
-  {
-    id: 'q1',
-    query: 'What are the placement statistics for Amazon?',
-    user: 'Student_992',
-    timestamp: '2023-12-22 10:30 AM',
-    sources: ['Placement_Report_Q3.pdf']
-  },
-  {
-    id: 'q2',
-    query: 'When is the CS major project submission?',
-    user: 'Student_104',
-    timestamp: '2023-12-22 09:15 AM',
-    sources: ['CS_Syllabus_2024.pdf']
-  },
-  {
-    id: 'q3',
-    query: 'Is there a campus map available?',
-    user: 'Visitor_44',
-    timestamp: '2023-12-21 04:45 PM',
-    sources: ['Campus_Overview_Brochure.pdf']
-  }
-];
+const getStoredAdminValue = (key) => {
+  return localStorage.getItem(key) || sessionStorage.getItem(key);
+};
+
+const clearAdminSession = () => {
+  localStorage.removeItem(ADMIN_STORAGE_KEYS.token);
+  localStorage.removeItem(ADMIN_STORAGE_KEYS.collegeId);
+  sessionStorage.removeItem(ADMIN_STORAGE_KEYS.token);
+  sessionStorage.removeItem(ADMIN_STORAGE_KEYS.collegeId);
+};
+
+const persistAdminSession = (accessToken, collegeId, rememberMe) => {
+  const storage = rememberMe ? localStorage : sessionStorage;
+  clearAdminSession();
+  storage.setItem(ADMIN_STORAGE_KEYS.token, accessToken);
+  storage.setItem(ADMIN_STORAGE_KEYS.collegeId, collegeId);
+};
 
 const StatusBadge = ({ status, ragStatus }) => {
   const styles = {
-    Ingested: 'bg-green-100 text-green-700 border-green-200',
     Completed: 'bg-green-100 text-green-700 border-green-200',
     'RAG Ready': 'bg-emerald-100 text-emerald-700 border-emerald-200',
     Pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
     'Pending Approval': 'bg-yellow-100 text-yellow-700 border-yellow-200',
     Processing: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     'RAG Processing': 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
-    Ingesting: 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse',
     Failed: 'bg-red-100 text-red-700 border-red-200',
     Approved: 'bg-indigo-100 text-indigo-700 border-indigo-200'
   };
 
   const icons = {
-    Ingested: <CheckCircle size={14} className="mr-1" />,
     Completed: <CheckCircle size={14} className="mr-1" />,
     'RAG Ready': <CheckCircle size={14} className="mr-1" />,
     Pending: <Clock size={14} className="mr-1" />,
     'Pending Approval': <Clock size={14} className="mr-1" />,
     Processing: <RefreshCw size={14} className="mr-1 animate-spin" />,
     'RAG Processing': <RefreshCw size={14} className="mr-1 animate-spin" />,
-    Ingesting: <RefreshCw size={14} className="mr-1 animate-spin" />,
     Failed: <AlertCircle size={14} className="mr-1" />,
     Approved: <CheckCircle size={14} className="mr-1" />
   };
@@ -95,16 +82,36 @@ const StatusBadge = ({ status, ragStatus }) => {
 };
 
 const App = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('admin_token'));
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(getStoredAdminValue(ADMIN_STORAGE_KEYS.token)));
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [documents, setDocuments] = useState([]);
-  const [history, setHistory] = useState(INITIAL_HISTORY);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [notification, setNotification] = useState(null);
+
+  const formatHistoryTimestamp = (value) => {
+    if (!value) return 'Unknown time';
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -112,8 +119,7 @@ const App = () => {
     try {
       const data = await adminAPI.login(loginEmail, loginPassword);
       if (data.role === 'college_admin') {
-        localStorage.setItem('admin_token', data.access_token);
-        localStorage.setItem('admin_college_id', data.college_id);
+        persistAdminSession(data.access_token, data.college_id, rememberMe);
         setIsAuthenticated(true);
       } else {
         setLoginError('Access denied. You must be a college admin.');
@@ -124,9 +130,11 @@ const App = () => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('admin_token');
-    localStorage.removeItem('admin_college_id');
+    clearAdminSession();
     setIsAuthenticated(false);
+    setRememberMe(false);
+    setHistory([]);
+    setHistoryError('');
   };
 
   // Fetch documents from API
@@ -156,9 +164,29 @@ const App = () => {
     }
   };
 
+  const fetchHistory = async () => {
+    if (!isAuthenticated) return;
+
+    setHistoryLoading(true);
+    setHistoryError('');
+
+    try {
+      const data = await adminAPI.getQueryHistory();
+      const queryHistory = Array.isArray(data?.query_history) ? data.query_history : [];
+      setHistory(queryHistory);
+    } catch (error) {
+      console.error('Error fetching query history:', error);
+      setHistory([]);
+      setHistoryError(error.message || 'Failed to load query history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   React.useEffect(() => {
     if (isAuthenticated) {
       fetchDocuments();
+      fetchHistory();
       // Poll for updates every 10 seconds to see status changes
       const interval = setInterval(fetchDocuments, 10000);
       return () => clearInterval(interval);
@@ -169,7 +197,7 @@ const App = () => {
   const stats = useMemo(
     () => ({
       total: documents.length,
-      ingested: documents.filter((d) => d.status === 'Completed' || d.status === 'Ingested').length,
+      completed: documents.filter((d) => d.status === 'Completed').length,
       ragReady: documents.filter((d) => d.ragStatus?.is_rag_ready).length,
       pending: documents.filter((d) => d.status === 'Processing' || d.status === 'Pending' || d.status === 'Pending_approval').length,
       failed: documents.filter((d) => d.status === 'Failed').length,
@@ -229,18 +257,6 @@ const App = () => {
     }
   };
 
-  const triggerIngestion = (id) => {
-    setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Ingesting' } : doc)));
-
-    // Simulate ChromaDB ingestion process
-    setTimeout(() => {
-      setDocuments((prev) => prev.map((doc) => (doc.id === id ? { ...doc, status: 'Ingested' } : doc)));
-      showNotification('Document ingested into ChromaDB successfully.');
-    }, 3000);
-  };
-
-
-
   if (!isAuthenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 font-sans">
@@ -285,6 +301,15 @@ const App = () => {
                 onChange={(e) => setLoginPassword(e.target.value)}
               />
             </div>
+            <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-colors hover:border-slate-300">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-2 focus:ring-indigo-500/30"
+              />
+              <span className="font-medium">Remember me on this device</span>
+            </label>
             <button
               type="submit"
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-100"
@@ -367,7 +392,7 @@ const App = () => {
             </h1>
             <p className="text-slate-500 text-sm mt-1">
               {activeTab === 'dashboard' && 'Real-time status of your knowledge base.'}
-              {activeTab === 'documents' && 'Upload and ingest files into ChromaDB.'}
+              {activeTab === 'documents' && 'Upload documents and monitor approval and RAG processing.'}
               {activeTab === 'history' && 'Monitor how students are interacting with AI.'}
             </p>
           </div>
@@ -407,7 +432,7 @@ const App = () => {
               {[
                 { label: 'Total Docs', value: stats.total, color: 'bg-indigo-600', icon: FileText },
                 { label: 'RAG Ready', value: stats.ragReady, color: 'bg-emerald-600', icon: CheckCircle },
-                { label: 'Ingested', value: stats.ingested, color: 'bg-green-600', icon: CheckCircle },
+                { label: 'Completed', value: stats.completed, color: 'bg-green-600', icon: CheckCircle },
                 { label: 'Processing', value: stats.processing, color: 'bg-blue-600', icon: RefreshCw },
                 { label: 'Failed', value: stats.failed, color: 'bg-red-600', icon: AlertCircle }
               ].map((item, i) => (
@@ -462,15 +487,7 @@ const App = () => {
                           </div>
                         </div>
 
-                        {doc.status === 'Pending' ? (
-                          <button
-                            onClick={() => triggerIngestion(doc.id)}
-                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
-                          >
-                            <RefreshCw size={12} />
-                            Ingest Now
-                          </button>
-                        ) : doc.status === 'Approved' ? (
+                        {doc.status === 'Approved' ? (
                           <button
                             onClick={() => triggerRagProcessing(doc.id)}
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5"
@@ -478,6 +495,11 @@ const App = () => {
                             <RefreshCw size={12} />
                             Start RAG
                           </button>
+                        ) : doc.status === 'Pending' ? (
+                          <div className="flex items-center gap-2 text-yellow-600">
+                            <Clock size={14} />
+                            <span className="text-xs font-medium">Awaiting approval</span>
+                          </div>
                         ) : (
                           <div className="flex items-center gap-2 text-blue-600">
                             <RefreshCw size={14} className="animate-spin" />
@@ -507,17 +529,24 @@ const App = () => {
                 </div>
 
                 <div className="space-y-4">
-                  {history.slice(0, 3).map((item) => (
+                  {history.length > 0 ? history.slice(0, 3).map((item) => (
                     <div key={item.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <p className="text-sm text-slate-800 line-clamp-1 italic">&quot;{item.query}&quot;</p>
-                      <div className="flex items-center justify-between mt-3">
+                      <div className="flex items-center justify-between mt-1 gap-3">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                          <History size={10} /> {item.timestamp}
+                          <History size={10} /> {formatHistoryTimestamp(item.created_at)}
                         </span>
-                        <span className="text-xs font-semibold text-indigo-600">{item.user}</span>
+                        <span className="text-xs font-semibold text-indigo-600">{item.message_count || 0} messages</span>
                       </div>
+                      <p className="text-sm text-slate-800 line-clamp-1 italic mt-3">&quot;{item.query}&quot;</p>
+                      <p className="text-xs text-slate-500 mt-2 font-medium">{item.title || 'Untitled conversation'}</p>
                     </div>
-                  ))}
+                  )) : (
+                    <div className="text-center py-8">
+                      <p className="text-slate-400 text-sm italic">
+                        {historyError || 'No query history available yet.'}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -642,15 +671,6 @@ const App = () => {
                           <td className="px-6 py-4 text-xs text-slate-500">{doc.date}</td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex justify-end gap-2">
-                              {doc.status === 'Pending' && (
-                                <button
-                                  onClick={() => triggerIngestion(doc.id)}
-                                  className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                  title="Ingest into ChromaDB"
-                                >
-                                  <RefreshCw size={16} />
-                                </button>
-                              )}
                               {(doc.status === 'Approved' || doc.status === 'Failed') && (
                                 <button
                                   onClick={() => triggerRagProcessing(doc.id)}
@@ -688,14 +708,20 @@ const App = () => {
               </div>
 
               <div className="divide-y divide-slate-100">
-                {history.map((item) => (
+                {historyLoading ? (
+                  <div className="p-6 text-sm text-slate-500">Loading query history...</div>
+                ) : historyError ? (
+                  <div className="p-6 text-sm text-red-600">{historyError}</div>
+                ) : history.length === 0 ? (
+                  <div className="p-6 text-sm text-slate-500">No query history available yet.</div>
+                ) : history.map((item) => (
                   <div key={item.id} className="p-6 hover:bg-slate-50/50 transition-colors">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center gap-2">
+                    <div className="flex justify-between items-start mb-2 gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase">
-                          User ID: {item.user}
+                          {item.title || 'Untitled conversation'}
                         </span>
-                        <span className="text-slate-400 text-xs">{item.timestamp}</span>
+                        <span className="text-slate-400 text-xs">{formatHistoryTimestamp(item.created_at)}</span>
                       </div>
                       <button className="text-slate-400 hover:text-indigo-600">
                         <ChevronRight size={20} />
@@ -706,17 +732,12 @@ const App = () => {
 
                     <div className="flex flex-wrap gap-2 items-center">
                       <span className="text-[10px] text-slate-400 uppercase font-bold tracking-tight">
-                        Verified Sources:
+                        Conversation Size:
                       </span>
-                      {item.sources.map((source, i) => (
-                        <span
-                          key={i}
-                          className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600"
-                        >
-                          <FileText size={12} className="text-indigo-400" />
-                          {source}
-                        </span>
-                      ))}
+                      <span className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600">
+                        <History size={12} className="text-indigo-400" />
+                        {item.message_count || 0} messages
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -764,5 +785,3 @@ const App = () => {
 };
 
 export default App;
-
-

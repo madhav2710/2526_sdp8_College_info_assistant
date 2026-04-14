@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Clock, CheckCircle, XCircle, Calendar, Play } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { superadminAPI } from '../services/api';
 
 const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
-  const { apiCall } = useAuth();
   const [pendingDocs, setPendingDocs] = useState([]);
+  const [scheduledDocs, setScheduledDocs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -15,38 +15,49 @@ const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
   const [comments, setComments] = useState('');
 
   useEffect(() => {
-    loadPendingDocuments();
+    loadWorkflowData();
   }, []);
 
-  const loadPendingDocuments = async () => {
+  const resetModalState = () => {
+    setSelectedDoc(null);
+    setComments('');
+    setProcessSchedule('immediate');
+    setScheduledAt('');
+    setShowApprovalModal(false);
+    setShowRejectionModal(false);
+    setShowScheduleModal(false);
+  };
+
+  const loadWorkflowData = async () => {
     try {
       setLoading(true);
-      const data = await apiCall('/super-admin/pending-documents');
-      setPendingDocs(data.pending_documents || []);
+      const [pendingData, scheduledData] = await Promise.all([
+        superadminAPI.getPendingDocuments(),
+        superadminAPI.getScheduledDocuments(),
+      ]);
+      setPendingDocs(pendingData.pending_documents || []);
+      setScheduledDocs(scheduledData.scheduled_documents || []);
     } catch (error) {
-      console.error('Failed to load pending documents:', error);
+      console.error('Failed to load document workflow data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const loadPendingDocuments = async () => {
+    return loadWorkflowData();
+  };
+
   const handleApprove = async () => {
     try {
-      await apiCall('/super-admin/approve-document', {
-        method: 'POST',
-        body: JSON.stringify({
-          document_id: selectedDoc.id,
-          comments: comments,
-          process_schedule: processSchedule,
-          scheduled_at: processSchedule === 'scheduled' ? scheduledAt : null
-        })
-      });
-      setShowApprovalModal(false);
-      setSelectedDoc(null);
-      setComments('');
-      setProcessSchedule('immediate');
-      setScheduledAt('');
-      await loadPendingDocuments();
+      await superadminAPI.approveDocument(
+        selectedDoc.id,
+        comments,
+        processSchedule,
+        processSchedule === 'scheduled' ? scheduledAt : null
+      );
+      resetModalState();
+      await loadWorkflowData();
       if (onApprove) onApprove();
     } catch (error) {
       alert('Failed to approve document: ' + error.message);
@@ -55,20 +66,33 @@ const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
 
   const handleReject = async () => {
     try {
-      await apiCall('/super-admin/reject-document', {
-        method: 'POST',
-        body: JSON.stringify({
-          document_id: selectedDoc.id,
-          reason: comments
-        })
-      });
-      setShowRejectionModal(false);
-      setSelectedDoc(null);
-      setComments('');
-      await loadPendingDocuments();
+      await superadminAPI.rejectDocument(selectedDoc.id, comments);
+      resetModalState();
+      await loadWorkflowData();
       if (onReject) onReject();
     } catch (error) {
       alert('Failed to reject document: ' + error.message);
+    }
+  };
+
+  const handleSchedule = async () => {
+    try {
+      await superadminAPI.scheduleDocumentProcessing(selectedDoc.id, scheduledAt);
+      resetModalState();
+      await loadWorkflowData();
+      if (onSchedule) onSchedule();
+    } catch (error) {
+      alert('Failed to schedule document processing: ' + error.message);
+    }
+  };
+
+  const handleTrigger = async (documentId) => {
+    try {
+      await superadminAPI.triggerDocumentProcessing(documentId);
+      await loadWorkflowData();
+      if (onTrigger) onTrigger();
+    } catch (error) {
+      alert('Failed to trigger processing: ' + error.message);
     }
   };
 
@@ -161,6 +185,66 @@ const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
         </div>
       )}
 
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Scheduled Processing Queue</h3>
+            <p className="text-sm text-slate-500">Manage already-approved documents queued for later processing.</p>
+          </div>
+          <button
+            onClick={loadWorkflowData}
+            className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
+          >
+            Refresh Queue
+          </button>
+        </div>
+
+        {scheduledDocs.length === 0 ? (
+          <div className="text-center py-8 text-slate-500">No documents are currently scheduled.</div>
+        ) : (
+          <div className="space-y-3">
+            {scheduledDocs.map((doc) => (
+              <div
+                key={doc.id}
+                className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between"
+              >
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="text-blue-600" size={18} />
+                    <h4 className="font-bold text-slate-900">{doc.filename}</h4>
+                  </div>
+                  <div className="text-sm text-slate-600 space-y-1">
+                    <p><span className="font-semibold">College:</span> {doc.college_name}</p>
+                    <p><span className="font-semibold">Scheduled for:</span> {new Date(doc.scheduled_at).toLocaleString()}</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedDoc(doc);
+                      setScheduledAt(doc.scheduled_at ? new Date(doc.scheduled_at).toISOString().slice(0, 16) : '');
+                      setShowScheduleModal(true);
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                  >
+                    <Calendar size={16} />
+                    Reschedule
+                  </button>
+                  <button
+                    onClick={() => handleTrigger(doc.id)}
+                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2"
+                  >
+                    <Play size={16} />
+                    Trigger Now
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Approval Modal */}
       {showApprovalModal && selectedDoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -210,11 +294,7 @@ const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  setShowApprovalModal(false);
-                  setSelectedDoc(null);
-                  setComments('');
-                  setProcessSchedule('immediate');
-                  setScheduledAt('');
+                  resetModalState();
                 }}
                 className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
               >
@@ -253,9 +333,7 @@ const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  setShowRejectionModal(false);
-                  setSelectedDoc(null);
-                  setComments('');
+                  resetModalState();
                 }}
                 className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
               >
@@ -272,9 +350,44 @@ const PendingDocuments = ({ onApprove, onReject, onSchedule, onTrigger }) => {
           </div>
         </div>
       )}
+
+      {showScheduleModal && selectedDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full">
+            <h3 className="text-xl font-bold mb-4">Reschedule Processing</h3>
+            <p className="text-slate-600 mb-6">{selectedDoc.filename}</p>
+
+            <div className="mb-6">
+              <label className="block text-sm font-semibold mb-2">New scheduled date & time</label>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                className="w-full px-4 py-2 border border-slate-200 rounded-lg"
+                min={new Date().toISOString().slice(0, 16)}
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={resetModalState}
+                className="flex-1 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSchedule}
+                disabled={!scheduledAt}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                Save Schedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default PendingDocuments;
-

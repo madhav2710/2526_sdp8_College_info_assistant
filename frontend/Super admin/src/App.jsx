@@ -32,6 +32,7 @@ const App = () => {
   const { user, login, logout, loading } = useAuth();
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [notification, setNotification] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -158,7 +159,7 @@ const App = () => {
     setLoginError('');
     
     try {
-      await login(loginEmail, loginPassword);
+      await login(loginEmail, loginPassword, rememberMe);
       showNotification('Login successful. Welcome!');
     } catch (error) {
       setLoginError(error.message);
@@ -170,6 +171,7 @@ const App = () => {
     logout();
     setLoginEmail('');
     setLoginPassword('');
+    setRememberMe(false);
     setAdmins([]);
     setColleges([]);
     setDocuments([]);
@@ -390,6 +392,15 @@ const App = () => {
                 onChange={(e) => setLoginPassword(e.target.value)}
               />
             </div>
+            <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 transition-colors hover:border-slate-300">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500/30"
+              />
+              <span className="font-medium">Remember me on this device</span>
+            </label>
             <button
               type="submit"
               className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-100 flex items-center justify-center gap-2"
@@ -723,6 +734,14 @@ const App = () => {
             }}
             onReject={() => {
               showNotification('Document rejected.');
+              fetchStats();
+            }}
+            onSchedule={() => {
+              showNotification('Document schedule updated.');
+              fetchStats();
+            }}
+            onTrigger={() => {
+              showNotification('Document processing triggered.');
               fetchStats();
             }}
           />

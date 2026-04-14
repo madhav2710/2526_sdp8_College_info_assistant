@@ -1,17 +1,21 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-// Get JWT token from localStorage
-const getToken = () => {
-  const user = localStorage.getItem('super_admin_user');
-  if (user) {
-    try {
-      const userData = JSON.parse(user);
-      return userData.token;
-    } catch {
-      return null;
-    }
+const getStoredUser = () => {
+  const storedUser = localStorage.getItem('super_admin_user') || sessionStorage.getItem('super_admin_user');
+
+  if (!storedUser) {
+    return null;
   }
-  return null;
+
+  try {
+    return JSON.parse(storedUser);
+  } catch {
+    return null;
+  }
+};
+
+const getToken = () => {
+  return getStoredUser()?.token || null;
 };
 
 // API request helper
@@ -127,10 +131,15 @@ export const superadminAPI = {
     return apiRequest('/super-admin/pending-documents');
   },
 
-  approveDocument: async (documentId, comments) => {
+  approveDocument: async (documentId, comments, processSchedule = 'immediate', scheduledAt = null) => {
     return apiRequest('/super-admin/approve-document', {
       method: 'POST',
-      body: JSON.stringify({ document_id: documentId, comments }),
+      body: JSON.stringify({
+        document_id: documentId,
+        comments,
+        process_schedule: processSchedule,
+        scheduled_at: processSchedule === 'scheduled' ? scheduledAt : null,
+      }),
     });
   },
 
@@ -138,6 +147,24 @@ export const superadminAPI = {
     return apiRequest('/super-admin/reject-document', {
       method: 'POST',
       body: JSON.stringify({ document_id: documentId, reason }),
+    });
+  },
+
+  getScheduledDocuments: async () => {
+    return apiRequest('/super-admin/scheduled-documents');
+  },
+
+  scheduleDocumentProcessing: async (documentId, scheduledAt) => {
+    return apiRequest('/super-admin/schedule-document-processing', {
+      method: 'POST',
+      body: JSON.stringify({ document_id: documentId, scheduled_at: scheduledAt }),
+    });
+  },
+
+  triggerDocumentProcessing: async (documentId) => {
+    return apiRequest('/super-admin/trigger-processing', {
+      method: 'POST',
+      body: JSON.stringify({ document_id: documentId }),
     });
   },
 };

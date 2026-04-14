@@ -2,11 +2,45 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { userAPI } from '../services/api';
 
 const AuthContext = createContext(null);
+const USER_STORAGE_KEY = 'user';
+
+const getStoredUser = () => {
+    const storages = [localStorage, sessionStorage];
+
+    for (const storage of storages) {
+        const storedUser = storage.getItem(USER_STORAGE_KEY);
+        if (!storedUser) {
+            continue;
+        }
+
+        try {
+            return {
+                user: JSON.parse(storedUser),
+                storage,
+            };
+        } catch {
+            storage.removeItem(USER_STORAGE_KEY);
+        }
+    }
+
+    return { user: null, storage: sessionStorage };
+};
+
+const clearStoredUser = () => {
+    localStorage.removeItem(USER_STORAGE_KEY);
+    sessionStorage.removeItem(USER_STORAGE_KEY);
+};
+
+const persistUser = (userData, storage) => {
+    clearStoredUser();
+    storage.setItem(USER_STORAGE_KEY, JSON.stringify(userData));
+};
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [authStorage, setAuthStorage] = useState(sessionStorage);
 
     const fetchProfile = async (token) => {
         try {
@@ -20,10 +54,12 @@ export const AuthProvider = ({ children }) => {
     };
 
     useEffect(() => {
-        const storedUser = localStorage.getItem('user');
+        const { user: storedUser, storage } = getStoredUser();
+
         if (storedUser) {
-            const userData = JSON.parse(storedUser);
+            const userData = storedUser;
             setUser(userData);
+            setAuthStorage(storage);
             // Fetch profile if user is logged in
             if (userData?.token) {
                 fetchProfile(userData.token);
@@ -32,8 +68,9 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
     }, []);
 
-    const login = async (email, password) => {
+    const login = async (email, password, rememberMe = false) => {
         const data = await userAPI.login(email, password);
+        const storage = rememberMe ? localStorage : sessionStorage;
         const userData = {
             token: data.access_token,
             userId: data.user_id,
@@ -44,7 +81,8 @@ export const AuthProvider = ({ children }) => {
         };
 
         setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
+        setAuthStorage(storage);
+        persistUser(userData, storage);
         
         // Fetch full profile
         const profileData = await fetchProfile(data.access_token);
@@ -57,7 +95,7 @@ export const AuthProvider = ({ children }) => {
                 collegeName: profileData.college_name,
             };
             setUser(updatedUser);
-            localStorage.setItem('user', JSON.stringify(updatedUser));
+            persistUser(updatedUser, storage);
         }
         
         return userData;
@@ -67,21 +105,19 @@ export const AuthProvider = ({ children }) => {
         const resp = await userAPI.setCollege(collegeId);
         const updated = { ...(user || {}), collegeId: resp.college_id };
         setUser(updated);
-        localStorage.setItem('user', JSON.stringify(updated));
+        persistUser(updated, authStorage);
         return updated;
     };
 
     const signup = async (email, password, fullName, collegeId) => {
-        // Create the account first
-        await userAPI.signup(email, password, fullName, collegeId);
-        // Then log in to obtain token and user info
-        return login(email, password);
+        return userAPI.signup(email, password, fullName, collegeId);
     };
 
     const logout = () => {
         setUser(null);
         setProfile(null);
-        localStorage.removeItem('user');
+        setAuthStorage(sessionStorage);
+        clearStoredUser();
     };
 
     const refreshProfile = async () => {
